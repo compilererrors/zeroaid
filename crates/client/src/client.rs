@@ -58,6 +58,11 @@ pub use user::*;
 static ZED_SERVER_URL: LazyLock<Option<String>> =
     LazyLock::new(|| std::env::var("ZED_SERVER_URL").ok());
 static ZED_RPC_URL: LazyLock<Option<String>> = LazyLock::new(|| std::env::var("ZED_RPC_URL").ok());
+static ZED_ENABLE_AUTOMATIC_CLOUD_CONNECTIONS: LazyLock<bool> = LazyLock::new(|| {
+    std::env::var("ZED_ENABLE_AUTOMATIC_CLOUD_CONNECTIONS").is_ok_and(|value| {
+        !value.is_empty() && value != "0" && !value.eq_ignore_ascii_case("false")
+    })
+});
 
 pub static IMPERSONATE_LOGIN: LazyLock<Option<String>> = LazyLock::new(|| {
     std::env::var("ZED_IMPERSONATE")
@@ -82,6 +87,10 @@ pub static ZED_ALWAYS_ACTIVE: LazyLock<bool> =
 pub const INITIAL_RECONNECTION_DELAY: Duration = Duration::from_millis(500);
 pub const MAX_RECONNECTION_DELAY: Duration = Duration::from_secs(30);
 pub const CONNECTION_TIMEOUT: Duration = Duration::from_secs(20);
+
+pub fn automatic_cloud_connections_enabled() -> bool {
+    *ZED_ENABLE_AUTOMATIC_CLOUD_CONNECTIONS
+}
 
 actions!(
     client,
@@ -649,51 +658,55 @@ impl Client {
                 state._reconnect_task = None;
             }
             Status::ConnectionLost => {
-                let client = self.clone();
-                state._reconnect_task = Some(cx.spawn(async move |cx| {
-                    #[cfg(any(test, feature = "test-support"))]
-                    let mut rng = StdRng::seed_from_u64(0);
-                    #[cfg(not(any(test, feature = "test-support")))]
-                    let mut rng = StdRng::from_os_rng();
+                if automatic_cloud_connections_enabled() {
+                    let client = self.clone();
+                    state._reconnect_task = Some(cx.spawn(async move |cx| {
+                        #[cfg(any(test, feature = "test-support"))]
+                        let mut rng = StdRng::seed_from_u64(0);
+                        #[cfg(not(any(test, feature = "test-support")))]
+                        let mut rng = StdRng::from_os_rng();
 
-                    let mut delay = INITIAL_RECONNECTION_DELAY;
-                    loop {
-                        match client.connect(true, cx).await {
-                            ConnectionResult::Timeout => {
-                                log::error!("client connect attempt timed out")
-                            }
-                            ConnectionResult::ConnectionReset => {
-                                log::error!("client connect attempt reset")
-                            }
-                            ConnectionResult::Result(r) => {
-                                if let Err(error) = r {
-                                    log::error!("failed to connect: {error}");
-                                } else {
-                                    break;
+                        let mut delay = INITIAL_RECONNECTION_DELAY;
+                        loop {
+                            match client.connect(true, cx).await {
+                                ConnectionResult::Timeout => {
+                                    log::error!("client connect attempt timed out")
+                                }
+                                ConnectionResult::ConnectionReset => {
+                                    log::error!("client connect attempt reset")
+                                }
+                                ConnectionResult::Result(r) => {
+                                    if let Err(error) = r {
+                                        log::error!("failed to connect: {error}");
+                                    } else {
+                                        break;
+                                    }
                                 }
                             }
-                        }
 
-                        if matches!(
-                            *client.status().borrow(),
-                            Status::AuthenticationError | Status::ConnectionError
-                        ) {
-                            client.set_status(
-                                Status::ReconnectionError {
-                                    next_reconnection: Instant::now() + delay,
-                                },
-                                cx,
-                            );
-                            let jitter = Duration::from_millis(
-                                rng.random_range(0..delay.as_millis() as u64),
-                            );
-                            cx.background_executor().timer(delay + jitter).await;
-                            delay = cmp::min(delay * 2, MAX_RECONNECTION_DELAY);
-                        } else {
-                            break;
+                            if matches!(
+                                *client.status().borrow(),
+                                Status::AuthenticationError | Status::ConnectionError
+                            ) {
+                                client.set_status(
+                                    Status::ReconnectionError {
+                                        next_reconnection: Instant::now() + delay,
+                                    },
+                                    cx,
+                                );
+                                let jitter = Duration::from_millis(
+                                    rng.random_range(0..delay.as_millis() as u64),
+                                );
+                                cx.background_executor().timer(delay + jitter).await;
+                                delay = cmp::min(delay * 2, MAX_RECONNECTION_DELAY);
+                            } else {
+                                break;
+                            }
                         }
-                    }
-                }));
+                    }));
+                } else {
+                    state._reconnect_task = None;
+                }
             }
             Status::SignedOut | Status::UpgradeRequired => {
                 self.telemetry.set_authenticated_user_info(None, false);
@@ -959,7 +972,8 @@ impl Client {
 
     /// Performs a sign-in and also (optionally) connects to Collab.
     ///
-    /// Only Zed staff automatically connect to Collab.
+    /// Only Zed staff automatically connect to Collab, and only when
+    /// `ZED_ENABLE_AUTOMATIC_CLOUD_CONNECTIONS` is enabled.
     pub async fn sign_in_with_optional_connect(
         self: &Arc<Self>,
         try_provider: bool,
@@ -967,6 +981,12 @@ impl Client {
     ) -> Result<()> {
         // Don't try to sign in again if we're already connected to Collab, as it will temporarily disconnect us.
         if self.status().borrow().is_connected() {
+            return Ok(());
+        }
+
+        let credentials = self.sign_in(try_provider, cx).await?;
+
+        if !automatic_cloud_connections_enabled() {
             return Ok(());
         }
 
@@ -980,8 +1000,6 @@ impl Client {
             })
             .detach();
         });
-
-        let credentials = self.sign_in(try_provider, cx).await?;
 
         self.connect_to_cloud(cx).await.log_err();
 
@@ -1377,7 +1395,7 @@ impl Client {
                         IMPERSONATE_LOGIN.as_ref().zip(ADMIN_API_TOKEN.as_ref())
                     {
                         if !*USE_WEB_LOGIN {
-                            eprintln!("authenticate as admin {login}, {token}");
+                            eprintln!("authenticate as admin");
 
                             return this
                                 .authenticate_as_admin(http, login.clone(), token.clone())
@@ -1536,7 +1554,23 @@ impl Client {
 
     pub fn reconnect(self: &Arc<Self>, cx: &AsyncApp) {
         self.peer.teardown();
-        self.set_status(Status::ConnectionLost, cx);
+        if automatic_cloud_connections_enabled() {
+            self.set_status(Status::ConnectionLost, cx);
+        } else {
+            let client = self.clone();
+            cx.spawn(async move |cx| match client.connect(true, cx).await {
+                ConnectionResult::Timeout => log::error!("manual client connect attempt timed out"),
+                ConnectionResult::ConnectionReset => {
+                    log::error!("manual client connect attempt reset")
+                }
+                ConnectionResult::Result(result) => {
+                    if let Err(error) = result {
+                        log::error!("manual client connect failed: {error}");
+                    }
+                }
+            })
+            .detach();
+        }
     }
 
     fn connection_id(&self) -> Result<ConnectionId> {

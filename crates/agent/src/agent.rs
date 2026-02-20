@@ -987,7 +987,7 @@ impl NativeAgentConnection {
         }) else {
             return Task::ready(Err(anyhow!("Session not found")));
         };
-        log::debug!("Found session for: {}", session_id);
+        log::debug!("Found session");
 
         let response_stream = match f(thread, cx) {
             Ok(stream) => stream,
@@ -1006,7 +1006,18 @@ impl NativeAgentConnection {
             while let Some(result) = events.next().await {
                 match result {
                     Ok(event) => {
-                        log::trace!("Received completion event: {:?}", event);
+                        let event_kind = match &event {
+                            ThreadEvent::UserMessage(_) => "user_message",
+                            ThreadEvent::AgentText(_) => "agent_text",
+                            ThreadEvent::AgentThinking(_) => "agent_thinking",
+                            ThreadEvent::ToolCallAuthorization(_) => "tool_call_authorization",
+                            ThreadEvent::ToolCall(_) => "tool_call",
+                            ThreadEvent::ToolCallUpdate(_) => "tool_call_update",
+                            ThreadEvent::SubagentSpawned(_) => "subagent_spawned",
+                            ThreadEvent::Retry(_) => "retry",
+                            ThreadEvent::Stop(_) => "stop",
+                        };
+                        log::trace!("Received completion event kind: {}", event_kind);
 
                         match event {
                             ThreadEvent::UserMessage(message) => {
@@ -1293,7 +1304,7 @@ impl acp_thread::AgentConnection for NativeAgentConnection {
     ) -> Task<Result<acp::PromptResponse>> {
         let id = id.expect("UserMessageId is required");
         let session_id = params.session_id.clone();
-        log::info!("Received prompt request for session: {}", session_id);
+        log::info!("Received prompt request");
         log::debug!("Prompt blocks count: {}", params.prompt.len());
 
         if let Some(parsed_command) = Command::parse(&params.prompt) {
@@ -1346,8 +1357,6 @@ impl acp_thread::AgentConnection for NativeAgentConnection {
                 .collect::<Vec<_>>();
             log::debug!("Converted prompt to message: {} chars", content.len());
             log::debug!("Message id: {:?}", id);
-            log::debug!("Message content: {:?}", content);
-
             thread.update(cx, |thread, cx| thread.send(id, content, cx))
         })
     }
@@ -1364,7 +1373,7 @@ impl acp_thread::AgentConnection for NativeAgentConnection {
     }
 
     fn cancel(&self, session_id: &acp::SessionId, cx: &mut App) {
-        log::info!("Cancelling on session: {}", session_id);
+        log::info!("Cancelling session");
         self.0.update(cx, |agent, cx| {
             if let Some(session) = agent.sessions.get(session_id) {
                 session

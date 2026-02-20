@@ -361,7 +361,7 @@ impl McpServer {
             select_biased! {
                 message = outgoing_rx.next().fuse() => {
                     if let Some(message) = message {
-                        log::trace!("send: {}", &message);
+                        log::trace!("send message ({} bytes)", message.len());
                         outgoing_bytes.write_all(message.as_bytes()).await?;
                         outgoing_bytes.write_all(&[b'\n']).await?;
                     } else {
@@ -372,7 +372,7 @@ impl McpServer {
                     if bytes_read? == 0 {
                         break
                     }
-                    log::trace!("recv: {}", &incoming_line);
+                    log::trace!("recv message ({} bytes)", incoming_line.len());
                     match serde_json::from_str(&incoming_line) {
                         Ok(message) => {
                             incoming_tx.unbounded_send(message).log_err();
@@ -386,7 +386,10 @@ impl McpServer {
                                 }),
                             }))?.as_bytes()).await?;
                             outgoing_bytes.write_all(&[b'\n']).await?;
-                            log::error!("failed to parse incoming message: {error}. Raw: {incoming_line}");
+                            log::error!(
+                                "failed to parse incoming message: {error} ({} bytes)",
+                                incoming_line.len()
+                            );
                         }
                     }
                     incoming_line.clear();

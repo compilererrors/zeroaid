@@ -118,7 +118,7 @@ impl OpenRequest {
                         session_id: session_id_str.to_string(),
                     });
                 } else {
-                    log::error!("Invalid session ID in URL: {}", session_id_str);
+                    log::error!("Invalid session ID in URL");
                 }
             } else if let Some(schema_path) = url.strip_prefix("zed://schemas/") {
                 this.kind = Some(OpenRequestKind::BuiltinJsonSchema {
@@ -149,7 +149,7 @@ impl OpenRequest {
                     }
                 }
             } else {
-                log::error!("unhandled url: {}", url);
+                log::error!("unhandled url");
             }
         }
 

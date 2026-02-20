@@ -103,7 +103,7 @@ impl StdioTransport {
         let mut stdin = BufWriter::new(stdin);
         let mut pinned_rx = Box::pin(outbound_rx);
         while let Some(message) = pinned_rx.next().await {
-            log::trace!("outgoing message: {}", message);
+            log::trace!("outgoing message ({} bytes)", message.len());
 
             stdin.write_all(message.as_bytes()).await?;
             stdin.write_all(b"\n").await?;

@@ -94,7 +94,7 @@ impl HttpTransport {
                     .and_then(|v| v.to_str().ok())
                 {
                     *self.session_id.lock() = Some(session_id.to_string());
-                    log::debug!("Session ID set: {}", session_id);
+                    log::debug!("Session ID set");
                 }
 
                 match content_type {

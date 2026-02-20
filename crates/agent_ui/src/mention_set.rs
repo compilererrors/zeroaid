@@ -10,12 +10,12 @@ use editor::{
     display_map::{Crease, CreaseId, CreaseMetadata, FoldId},
     scroll::Autoscroll,
 };
-use futures::{AsyncReadExt as _, FutureExt as _, future::Shared};
+use futures::{FutureExt as _, future::Shared};
 use gpui::{
     AppContext, ClipboardEntry, Context, Empty, Entity, EntityId, Image, ImageFormat, Img,
     SharedString, Task, WeakEntity,
 };
-use http_client::{AsyncBody, HttpClientWithUrl};
+use http_client::HttpClientWithUrl;
 use itertools::Either;
 use language::Buffer;
 use language_model::LanguageModelImage;
@@ -25,7 +25,6 @@ use project::{Project, ProjectItem, ProjectPath, Worktree};
 use prompt_store::{PromptId, PromptStore};
 use rope::Point;
 use std::{
-    cell::RefCell,
     ffi::OsStr,
     fmt::Write,
     ops::{Range, RangeInclusive},
@@ -381,17 +380,12 @@ impl MentionSet {
 
     fn confirm_mention_for_fetch(
         &self,
-        url: url::Url,
-        http_client: Arc<HttpClientWithUrl>,
+        _url: url::Url,
+        _http_client: Arc<HttpClientWithUrl>,
         cx: &mut Context<Self>,
     ) -> Task<Result<Mention>> {
-        cx.background_executor().spawn(async move {
-            let content = fetch_url_content(http_client, url.to_string()).await?;
-            Ok(Mention::Text {
-                content,
-                tracked_buffers: Vec::new(),
-            })
-        })
+        let _ = cx;
+        Task::ready(Ok(Mention::Link))
     }
 
     fn confirm_mention_for_symbol(
@@ -642,6 +636,7 @@ mod tests {
             "Unexpected error: {error:#}"
         );
     }
+
 }
 
 /// Inserts a list of images into the editor as context mentions.
@@ -1106,85 +1101,6 @@ impl Render for ImageHover {
                 .into_any_element()
         } else {
             gpui::Empty.into_any_element()
-        }
-    }
-}
-
-async fn fetch_url_content(http_client: Arc<HttpClientWithUrl>, url: String) -> Result<String> {
-    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
-    enum ContentType {
-        Html,
-        Plaintext,
-        Json,
-    }
-    use html_to_markdown::{TagHandler, convert_html_to_markdown, markdown};
-
-    let url = if !url.starts_with("https://") && !url.starts_with("http://") {
-        format!("https://{url}")
-    } else {
-        url
-    };
-
-    let mut response = http_client.get(&url, AsyncBody::default(), true).await?;
-    let mut body = Vec::new();
-    response
-        .body_mut()
-        .read_to_end(&mut body)
-        .await
-        .context("error reading response body")?;
-
-    if response.status().is_client_error() {
-        let text = String::from_utf8_lossy(body.as_slice());
-        anyhow::bail!(
-            "status error {}, response: {text:?}",
-            response.status().as_u16()
-        );
-    }
-
-    let Some(content_type) = response.headers().get("content-type") else {
-        anyhow::bail!("missing Content-Type header");
-    };
-    let content_type = content_type
-        .to_str()
-        .context("invalid Content-Type header")?;
-    let content_type = match content_type {
-        "text/html" => ContentType::Html,
-        "text/plain" => ContentType::Plaintext,
-        "application/json" => ContentType::Json,
-        _ => ContentType::Html,
-    };
-
-    match content_type {
-        ContentType::Html => {
-            let mut handlers: Vec<TagHandler> = vec![
-                Rc::new(RefCell::new(markdown::WebpageChromeRemover)),
-                Rc::new(RefCell::new(markdown::ParagraphHandler)),
-                Rc::new(RefCell::new(markdown::HeadingHandler)),
-                Rc::new(RefCell::new(markdown::ListHandler)),
-                Rc::new(RefCell::new(markdown::TableHandler::new())),
-                Rc::new(RefCell::new(markdown::StyledTextHandler)),
-            ];
-            if url.contains("wikipedia.org") {
-                use html_to_markdown::structure::wikipedia;
-
-                handlers.push(Rc::new(RefCell::new(wikipedia::WikipediaChromeRemover)));
-                handlers.push(Rc::new(RefCell::new(wikipedia::WikipediaInfoboxHandler)));
-                handlers.push(Rc::new(
-                    RefCell::new(wikipedia::WikipediaCodeHandler::new()),
-                ));
-            } else {
-                handlers.push(Rc::new(RefCell::new(markdown::CodeHandler)));
-            }
-            convert_html_to_markdown(&body[..], &mut handlers)
-        }
-        ContentType::Plaintext => Ok(std::str::from_utf8(&body)?.to_owned()),
-        ContentType::Json => {
-            let json: serde_json::Value = serde_json::from_slice(&body)?;
-
-            Ok(format!(
-                "```json\n{}\n```",
-                serde_json::to_string_pretty(&json)?
-            ))
         }
     }
 }
