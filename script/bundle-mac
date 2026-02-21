@@ -8,6 +8,7 @@ target_dir="release"
 open_result=false
 local_install=false
 can_code_sign=false
+cargo_feature_flags=()
 
 # This must match the team in the provisioning profile.
 IDENTITY="Zed Industries, Inc."
@@ -21,13 +22,15 @@ Build the application bundle for macOS.
 
 Options:
   -d    Compile in debug mode
+  -n    Build zed without default Cargo features.
+  -f    Additional Cargo features for zed (comma-separated, repeatable).
   -o    Open dir with the resulting DMG or launch the app itself in local mode.
   -i    Install the resulting DMG into /Applications.
   -h    Display this help and exit.
   "
 }
 
-while getopts 'dloih' flag
+while getopts 'dloinf:h' flag
 do
     case "${flag}" in
         o) open_result=true;;
@@ -36,6 +39,12 @@ do
             export CARGO_BUNDLE_SKIP_BUILD=true
             build_flag="";
             target_dir="debug"
+            ;;
+        n)
+            cargo_feature_flags+=(--no-default-features)
+            ;;
+        f)
+            cargo_feature_flags+=(--features "${OPTARG}")
             ;;
         i) local_install=true;;
         h)
@@ -81,13 +90,62 @@ else
     exit 1
 fi
 
+function app_bundle_name_for_channel() {
+    local channel_name=$1
+
+    case "$channel_name" in
+        dev)
+            echo "Zed Dev.app"
+            ;;
+        nightly)
+            echo "Zed Nightly.app"
+            ;;
+        preview)
+            echo "Zed Preview.app"
+            ;;
+        stable)
+            echo "Zed.app"
+            ;;
+        *)
+            echo "Zed Dev.app"
+            ;;
+    esac
+}
+
+function create_bundle_from_installed_template() {
+    local channel_name=$1
+    local target_triple_name=$2
+    local target_dir_name=$3
+
+    local app_bundle_name
+    app_bundle_name=$(app_bundle_name_for_channel "$channel_name")
+
+    local installed_app_path="/Applications/${app_bundle_name}"
+    if [[ ! -d "${installed_app_path}" ]]; then
+        echo "cargo bundle fallback failed: missing template app at ${installed_app_path}" >&2
+        return 1
+    fi
+
+    local bundle_root="../../target/${target_triple_name}/${target_dir_name}/bundle/osx"
+    local bundle_path="${bundle_root}/${app_bundle_name}"
+
+    rm -rf "${bundle_path}"
+    mkdir -p "${bundle_root}"
+    cp -R "${installed_app_path}" "${bundle_path}"
+
+    local absolute_bundle_root
+    absolute_bundle_root=$(cd "${bundle_root}" && pwd)
+    echo "${absolute_bundle_root}/${app_bundle_name}"
+}
+
 # Generate the licenses first, so they can be baked into the binaries
 script/generate-licenses
 
 rustup target add $target_triple
 
 echo "Compiling zed binaries"
-cargo build ${build_flag} --package zed --package cli --target $target_triple
+cargo build ${build_flag} --package zed --target $target_triple "${cargo_feature_flags[@]}"
+cargo build ${build_flag} --package cli --target $target_triple
 # Build remote_server in separate invocation to prevent feature unification from other crates
 # from influencing dynamic libraries required by it.
 cargo build ${build_flag} --package remote_server --target $target_triple
@@ -100,9 +158,45 @@ sed \
     "s/package.metadata.bundle-${channel}/package.metadata.bundle/" \
     Cargo.toml
 
-app_path=$(cargo bundle ${build_flag} --target $target_triple --select-workspace-root | xargs)
+restore_bundle_manifest() {
+    if [[ -f Cargo.toml.backup ]]; then
+        mv Cargo.toml.backup Cargo.toml
+    fi
+}
+trap restore_bundle_manifest EXIT
 
-mv Cargo.toml.backup Cargo.toml
+app_path=$(
+    bundle_stderr=$(mktemp)
+    set +e
+    NO_COLOR=1 \
+    CARGO_TERM_COLOR=never \
+    CLICOLOR=0 \
+    CLICOLOR_FORCE=0 \
+    cargo bundle ${build_flag} --target $target_triple --select-workspace-root "${cargo_feature_flags[@]}" \
+        2>"${bundle_stderr}" \
+        | xargs
+    bundle_status=$?
+    set -e
+
+    if [[ -s "${bundle_stderr}" ]]; then
+        cat "${bundle_stderr}" >&2
+    fi
+
+    if [[ ${bundle_status} -ne 0 ]]; then
+        if rg -q "ColorOutOfRange" "${bundle_stderr}"; then
+            echo "cargo bundle crashed with ColorOutOfRange; using installed app template fallback." >&2
+            create_bundle_from_installed_template "$channel" "$target_triple" "$target_dir"
+        else
+            rm -f "${bundle_stderr}"
+            exit "${bundle_status}"
+        fi
+    fi
+
+    rm -f "${bundle_stderr}"
+)
+
+restore_bundle_manifest
+trap - EXIT
 popd
 echo "Bundled ${app_path}"
 
@@ -171,10 +265,18 @@ function download_git() {
 
     case "$architecture" in
         aarch64-apple-darwin)
-            download_and_unpack "https://github.com/desktop/dugite-native/releases/download/${GIT_VERSION}/dugite-native-${GIT_VERSION}-${GIT_VERSION_SHA}-macOS-arm64.tar.gz" bin/git ./git
+            if ! download_and_unpack "https://github.com/desktop/dugite-native/releases/download/${GIT_VERSION}/dugite-native-${GIT_VERSION}-${GIT_VERSION_SHA}-macOS-arm64.tar.gz" bin/git ./git; then
+                popd
+                rm -rf "$tmp_dir"
+                return 1
+            fi
             ;;
         x86_64-apple-darwin)
-            download_and_unpack "https://github.com/desktop/dugite-native/releases/download/${GIT_VERSION}/dugite-native-${GIT_VERSION}-${GIT_VERSION_SHA}-macOS-x64.tar.gz" bin/git ./git
+            if ! download_and_unpack "https://github.com/desktop/dugite-native/releases/download/${GIT_VERSION}/dugite-native-${GIT_VERSION}-${GIT_VERSION_SHA}-macOS-x64.tar.gz" bin/git ./git; then
+                popd
+                rm -rf "$tmp_dir"
+                return 1
+            fi
             ;;
         *)
             echo "Unsupported architecture: $architecture"
@@ -184,7 +286,11 @@ function download_git() {
 
     popd
 
-    mv "${tmp_dir}/git" "${target_binary}"
+    if ! mv "${tmp_dir}/git" "${target_binary}"; then
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+
     rm -rf "$tmp_dir"
 }
 
@@ -192,8 +298,18 @@ function sign_app_binaries() {
     rm -rf "${app_path}/Contents/Frameworks"
     mkdir -p "${app_path}/Contents/Frameworks"
 
-    echo "Downloading git binary"
-    download_git "${target_triple}" "${app_path}/Contents/MacOS/git"
+    echo "Provisioning git binary"
+    if ! download_git "${target_triple}" "${app_path}/Contents/MacOS/git"; then
+        echo "Falling back to local git binary"
+        if ! command -v git &> /dev/null; then
+            echo "git is not installed. Please install git to continue."
+            exit 1
+        fi
+
+        cp "$(command -v git)" "${app_path}/Contents/MacOS/git"
+    fi
+
+    chmod +x "${app_path}/Contents/MacOS/git"
 
     # Note: The app identifier for our development builds is the same as the app identifier for nightly.
     cp crates/zed/contents/$channel/embedded.provisionprofile "${app_path}/Contents/"

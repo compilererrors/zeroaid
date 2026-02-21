@@ -3253,6 +3253,7 @@ impl GitPanel {
         }
     }
 
+    #[cfg(feature = "collab")]
     fn potential_co_authors(&self, cx: &App) -> Vec<(String, String)> {
         let mut new_co_authors = Vec::new();
         let project = self.project.read(cx);
@@ -3296,6 +3297,12 @@ impl GitPanel {
         new_co_authors
     }
 
+    #[cfg(not(feature = "collab"))]
+    fn potential_co_authors(&self, _cx: &App) -> Vec<(String, String)> {
+        Vec::default()
+    }
+
+    #[cfg(feature = "collab")]
     fn local_committer(&self, room: &call::Room, cx: &App) -> Option<(String, String)> {
         let user = room.local_participant_user(cx)?;
         let committer = self.local_committer.as_ref()?;
@@ -5520,6 +5527,7 @@ impl Render for GitPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let project = self.project.read(cx);
         let has_entries = !self.entries.is_empty();
+        #[cfg(feature = "collab")]
         let room = self
             .workspace
             .upgrade()
@@ -5527,6 +5535,7 @@ impl Render for GitPanel {
 
         let has_write_access = self.has_write_access(cx);
 
+        #[cfg(feature = "collab")]
         let has_co_authors = room.is_some_and(|room| {
             self.load_local_committer(cx);
             let room = room.read(cx);
@@ -5534,6 +5543,8 @@ impl Render for GitPanel {
                 .values()
                 .any(|remote_participant| remote_participant.can_write())
         });
+        #[cfg(not(feature = "collab"))]
+        let has_co_authors = false;
 
         v_flex()
             .id("git_panel")

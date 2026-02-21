@@ -12,12 +12,13 @@ workspace = true
 path = "src/sidebar.rs"
 
 [features]
-default = []
+default = ["ai"]
+ai = ["dep:acp_thread", "dep:agent_ui"]
 test-support = []
 
 [dependencies]
-acp_thread.workspace = true
-agent_ui.workspace = true
+acp_thread = { workspace = true, optional = true }
+agent_ui = { workspace = true, optional = true }
 chrono.workspace = true
 db.workspace = true
 fs.workspace = true

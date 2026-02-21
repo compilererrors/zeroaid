@@ -4,13 +4,17 @@
 mod reliability;
 mod zed;
 
+#[cfg(feature = "ai")]
 use agent::{SharedThread, ThreadStore};
+#[cfg(feature = "ai")]
 use agent_client_protocol;
+#[cfg(feature = "ai")]
 use agent_ui::AgentPanel;
 use anyhow::{Context as _, Error, Result};
 use clap::Parser;
 use cli::FORCE_CLI_MODE_ENV_VAR_NAME;
 use client::{Client, ProxySettings, UserStore, parse_zed_link};
+#[cfg(feature = "collab")]
 use collab_ui::channel_view::ChannelView;
 use collections::HashMap;
 use crashes::InitCrashHandler;
@@ -21,7 +25,9 @@ use fs::{Fs, RealFs};
 use futures::{StreamExt, channel::oneshot, future};
 use git::GitHostingProviderRegistry;
 use git_ui::clone::clone_and_open;
-use gpui::{App, AppContext, Application, AsyncApp, Focusable as _, QuitMode, UpdateGlobal as _};
+#[cfg(feature = "ai")]
+use gpui::Focusable as _;
+use gpui::{App, AppContext, Application, AsyncApp, QuitMode, UpdateGlobal as _};
 use gpui_platform;
 
 use gpui_tokio::Tokio;
@@ -35,7 +41,10 @@ use reqwest_client::ReqwestClient;
 use assets::Assets;
 use node_runtime::{NodeBinaryOptions, NodeRuntime};
 use parking_lot::Mutex;
-use project::{DisableAiSettings, project_settings::ProjectSettings, trusted_worktrees};
+#[cfg(feature = "ai")]
+use project::DisableAiSettings;
+use project::{project_settings::ProjectSettings, trusted_worktrees};
+#[cfg(feature = "ai")]
 use proto;
 use recent_projects::{RemoteSettings, open_remote_project};
 use release_channel::{AppCommitSha, AppVersion, ReleaseChannel};
@@ -52,7 +61,9 @@ use std::{
     time::Instant,
 };
 use theme::{ActiveTheme, GlobalTheme, ThemeRegistry};
-use util::{ResultExt, TryFutureExt, maybe};
+use util::ResultExt;
+#[cfg(feature = "collab")]
+use util::{TryFutureExt, maybe};
 use uuid::Uuid;
 use workspace::{
     AppState, MultiWorkspace, SerializedWorkspaceLocation, SessionWorkspace, Toast,
@@ -60,9 +71,8 @@ use workspace::{
 };
 use zed::{
     OpenListener, OpenRequest, RawOpenRequest, app_menus, build_window_options,
-    derive_paths_with_position, edit_prediction_registry, handle_cli_connection,
-    handle_keymap_file_changes, handle_settings_file_changes, initialize_workspace,
-    open_paths_with_positions,
+    derive_paths_with_position, handle_cli_connection, handle_keymap_file_changes,
+    handle_settings_file_changes, initialize_workspace, open_paths_with_positions,
 };
 
 use crate::zed::{OpenRequestKind, eager_load_active_theme_and_icon_theme};
@@ -620,10 +630,12 @@ fn main() {
             cx.background_executor().clone(),
         );
         command_palette::init(cx);
+        #[cfg(feature = "ai")]
         let disable_ai = DisableAiSettings::get_global(cx).disable_ai;
         let prompt_builder = PromptBuilder::load(app_state.fs.clone(), stdout_is_a_pty(), cx);
         language_model::init(app_state.client.clone(), cx);
 
+        #[cfg(feature = "ai")]
         if !disable_ai {
             let copilot_chat_configuration = copilot_chat::CopilotChatConfiguration {
                 enterprise_uri: language::language_settings::all_language_settings(None, cx)
@@ -646,14 +658,16 @@ fn main() {
         }
         zed::telemetry_log::init(cx);
         zed::remote_debug::init(cx);
+        #[cfg(feature = "ai")]
         if !disable_ai {
             edit_prediction_ui::init(cx);
         }
         web_search::init(cx);
         web_search_providers::init(app_state.client.clone(), cx);
         snippet_provider::init(cx);
+        #[cfg(feature = "ai")]
         if !disable_ai {
-            edit_prediction_registry::init(
+            zed::edit_prediction_registry::init(
                 app_state.client.clone(),
                 app_state.user_store.clone(),
                 cx,
@@ -697,6 +711,7 @@ fn main() {
         outline_panel::init(cx);
         tasks_ui::init(cx);
         snippets_ui::init(cx);
+        #[cfg(feature = "collab")]
         channel::init(&app_state.client.clone(), app_state.user_store.clone(), cx);
         search::init(cx);
         cx.set_global(workspace::PaneSearchBarCallbacks {
@@ -718,8 +733,12 @@ fn main() {
         theme_selector::init(cx);
         settings_profile_selector::init(cx);
         language_tools::init(cx);
+        title_bar::init(cx);
+        #[cfg(feature = "collab")]
         call::init(app_state.client.clone(), app_state.user_store.clone(), cx);
+        #[cfg(feature = "collab")]
         notifications::init(app_state.client.clone(), app_state.user_store.clone(), cx);
+        #[cfg(feature = "collab")]
         collab_ui::init(&app_state, cx);
         git_ui::init(cx);
         git_graph::init(cx);
@@ -730,6 +749,7 @@ fn main() {
         settings_ui::init(cx);
         keymap_editor::init(cx);
         extensions_ui::init(cx);
+        #[cfg(feature = "ai")]
         if !disable_ai {
             edit_prediction::init(cx);
         }
@@ -806,6 +826,7 @@ fn main() {
 
         cx.activate(true);
 
+        #[cfg(feature = "collab")]
         cx.spawn({
             let client = app_state.client.clone();
             async move |cx| authenticate(client, cx).await
@@ -906,6 +927,7 @@ fn handle_open_request(request: OpenRequest, app_state: Arc<AppState>, cx: &mut 
                 })
                 .detach_and_log_err(cx);
             }
+            #[cfg(feature = "ai")]
             OpenRequestKind::AgentPanel { initial_prompt } => {
                 cx.spawn(async move |cx| {
                     let multi_workspace =
@@ -923,6 +945,7 @@ fn handle_open_request(request: OpenRequest, app_state: Arc<AppState>, cx: &mut 
                 })
                 .detach_and_log_err(cx);
             }
+            #[cfg(feature = "ai")]
             OpenRequestKind::SharedAgentThread { session_id } => {
                 cx.spawn(async move |cx| {
                     let multi_workspace =
@@ -1000,6 +1023,14 @@ fn handle_open_request(request: OpenRequest, app_state: Arc<AppState>, cx: &mut 
                     anyhow::Ok(())
                 })
                 .detach_and_log_err(cx);
+            }
+            #[cfg(not(feature = "ai"))]
+            OpenRequestKind::AgentPanel { .. } => {
+                log::warn!("Agent features are disabled in this build");
+            }
+            #[cfg(not(feature = "ai"))]
+            OpenRequestKind::SharedAgentThread { .. } => {
+                log::warn!("Agent features are disabled in this build");
             }
             OpenRequestKind::DockMenuAction { index } => {
                 cx.perform_dock_menu_action(index);
@@ -1206,6 +1237,7 @@ fn handle_open_request(request: OpenRequest, app_state: Arc<AppState>, cx: &mut 
         }));
     }
 
+    #[cfg(feature = "collab")]
     if !request.open_channel_notes.is_empty() || request.join_channel.is_some() {
         cx.spawn(async move |cx| {
             let result = maybe!(async {
@@ -1213,8 +1245,8 @@ fn handle_open_request(request: OpenRequest, app_state: Arc<AppState>, cx: &mut 
                     task.await?;
                 }
                 let client = app_state.client.clone();
-                // we continue even if authentication fails as join_channel/ open channel notes will
-                // show a visible error message.
+                // We continue even if authentication fails because join/open channel actions
+                // surface their own visible errors.
                 authenticate(client, cx).await.log_err();
 
                 if let Some(channel_id) = request.join_channel {
@@ -1256,8 +1288,16 @@ fn handle_open_request(request: OpenRequest, app_state: Arc<AppState>, cx: &mut 
                 fail_to_open_window_async(err, cx);
             }
         })
-        .detach()
-    } else if let Some(task) = task {
+        .detach();
+        return;
+    }
+
+    #[cfg(not(feature = "collab"))]
+    if !request.open_channel_notes.is_empty() || request.join_channel.is_some() {
+        log::warn!("Collaboration features are disabled in this build");
+    }
+
+    if let Some(task) = task {
         cx.spawn(async move |cx| {
             if let Err(err) = task.await {
                 fail_to_open_window_async(err, cx);
@@ -1267,6 +1307,7 @@ fn handle_open_request(request: OpenRequest, app_state: Arc<AppState>, cx: &mut 
     }
 }
 
+#[cfg(feature = "collab")]
 async fn authenticate(client: Arc<Client>, cx: &AsyncApp) -> Result<()> {
     if !client::automatic_cloud_connections_enabled() {
         return Ok(());

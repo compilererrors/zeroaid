@@ -13,14 +13,15 @@ name = "git_ui"
 path = "src/git_ui.rs"
 
 [features]
-test-support = ["multi_buffer/test-support", "remote_connection/test-support"]
+collab = ["dep:call", "workspace/collab"]
+test-support = ["collab", "multi_buffer/test-support", "remote_connection/test-support"]
 
 [dependencies]
 agent_settings.workspace = true
 anyhow.workspace = true
 askpass.workspace = true
 buffer_diff.workspace = true
-call.workspace = true
+call = { workspace = true, optional = true }
 cloud_llm_client.workspace = true
 collections.workspace = true
 component.workspace = true

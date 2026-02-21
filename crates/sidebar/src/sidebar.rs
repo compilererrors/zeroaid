@@ -1,4 +1,6 @@
+#[cfg(feature = "ai")]
 use acp_thread::ThreadStatus;
+#[cfg(feature = "ai")]
 use agent_ui::{AgentPanel, AgentPanelEvent};
 use chrono::{Datelike, Local, NaiveDate, TimeDelta};
 use db::kvp::KEY_VALUE_STORE;
@@ -110,6 +112,7 @@ impl WorkspaceThreadEntry {
         }
     }
 
+    #[cfg(feature = "ai")]
     fn thread_info(workspace: &Entity<Workspace>, cx: &App) -> Option<AgentThreadInfo> {
         let agent_panel = workspace.read(cx).panel::<AgentPanel>(cx)?;
         let agent_panel_ref = agent_panel.read(cx);
@@ -135,6 +138,11 @@ impl WorkspaceThreadEntry {
             status,
             icon,
         })
+    }
+
+    #[cfg(not(feature = "ai"))]
+    fn thread_info(_workspace: &Entity<Workspace>, _cx: &App) -> Option<AgentThreadInfo> {
+        None
     }
 }
 
@@ -908,26 +916,41 @@ impl Sidebar {
     ) -> Vec<Subscription> {
         let workspaces: Vec<_> = self.multi_workspace.read(cx).workspaces().to_vec();
 
-        workspaces
-            .iter()
-            .map(|workspace| {
-                if let Some(agent_panel) = workspace.read(cx).panel::<AgentPanel>(cx) {
-                    cx.subscribe_in(
-                        &agent_panel,
-                        window,
-                        |this, _, _event: &AgentPanelEvent, window, cx| {
+        #[cfg(feature = "ai")]
+        {
+            return workspaces
+                .iter()
+                .map(|workspace| {
+                    if let Some(agent_panel) = workspace.read(cx).panel::<AgentPanel>(cx) {
+                        cx.subscribe_in(
+                            &agent_panel,
+                            window,
+                            |this, _, _event: &AgentPanelEvent, window, cx| {
+                                this.queue_refresh(this.multi_workspace.clone(), window, cx);
+                            },
+                        )
+                    } else {
+                        // Panel hasn't loaded yet — observe the workspace so we
+                        // re-subscribe once the panel appears on its dock.
+                        cx.observe_in(workspace, window, |this, _, window, cx| {
                             this.queue_refresh(this.multi_workspace.clone(), window, cx);
-                        },
-                    )
-                } else {
-                    // Panel hasn't loaded yet — observe the workspace so we
-                    // re-subscribe once the panel appears on its dock.
+                        })
+                    }
+                })
+                .collect();
+        }
+
+        #[cfg(not(feature = "ai"))]
+        {
+            return workspaces
+                .iter()
+                .map(|workspace| {
                     cx.observe_in(workspace, window, |this, _, window, cx| {
                         this.queue_refresh(this.multi_workspace.clone(), window, cx);
                     })
-                }
-            })
-            .collect()
+                })
+                .collect();
+        }
     }
 
     fn subscribe_to_threads(
@@ -935,8 +958,17 @@ impl Sidebar {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Vec<Subscription> {
+        #[cfg(not(feature = "ai"))]
+        {
+            let _ = window;
+            let _ = cx;
+            return Vec::new();
+        }
+
+        #[cfg(feature = "ai")]
         let workspaces: Vec<_> = self.multi_workspace.read(cx).workspaces().to_vec();
 
+        #[cfg(feature = "ai")]
         workspaces
             .iter()
             .filter_map(|workspace| {

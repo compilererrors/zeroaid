@@ -1,4 +1,5 @@
 use collections::VecDeque;
+#[cfg(feature = "ai")]
 use edit_prediction::EditPredictionStore;
 use editor::{Editor, EditorEvent, MultiBufferOffset, actions::MoveToEnd, scroll::Autoscroll};
 use gpui::{
@@ -341,6 +342,7 @@ impl LspLogView {
         );
         (editor, vec![editor_subscription, search_subscription])
     }
+    #[cfg(feature = "ai")]
     pub(crate) fn try_ensure_copilot_for_project(&self, cx: &mut App) {
         self.log_store.update(cx, |this, cx| {
             let copilot = EditPredictionStore::try_global(cx)
@@ -380,6 +382,9 @@ impl LspLogView {
             Some(())
         });
     }
+
+    #[cfg(not(feature = "ai"))]
+    pub(crate) fn try_ensure_copilot_for_project(&self, _: &mut App) {}
     pub(crate) fn menu_items(&self, cx: &mut App) -> Option<Vec<LogMenuItem>> {
         self.try_ensure_copilot_for_project(cx);
         let log_store = self.log_store.read(cx);

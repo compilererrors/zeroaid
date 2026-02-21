@@ -84,7 +84,8 @@
   "diagnostics": {
     "include_warnings": false,
     "lsp_pull_diagnostics": {
-      "debounce_ms": 300,
+      "enabled": false,
+      "debounce_ms": 500,
     },
   },
   "git": {
@@ -95,7 +96,6 @@
       "enabled": false,
     },
   },
-  "language_servers": ["!tailwindcss-language-server", "..."],
   "project_panel": {
     "show_diagnostics": "off",
   },
