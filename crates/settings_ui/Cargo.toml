@@ -12,7 +12,7 @@ workspace = true
 path = "src/settings_ui.rs"
 
 [features]
-default = ["ai"]
+default = ["ai", "collab"]
 ai = [
     "dep:agent",
     "dep:agent_settings",
@@ -23,18 +23,19 @@ ai = [
     "dep:edit_prediction_ui",
     "dep:shell_command_parser",
 ]
-test-support = []
+collab = ["dep:audio", "dep:cpal", "dep:rodio"]
+test-support = ["collab"]
 
 [dependencies]
 agent = { workspace = true, optional = true }
 agent_settings = { workspace = true, optional = true }
 anyhow.workspace = true
-audio = { path = "../audio", default-features = false }
+audio = { path = "../audio", default-features = false, optional = true }
 component.workspace = true
 codestral = { workspace = true, optional = true }
 copilot = { workspace = true, optional = true }
 copilot_ui = { workspace = true, optional = true }
-cpal.workspace = true
+cpal = { workspace = true, optional = true }
 edit_prediction = { workspace = true, optional = true }
 edit_prediction_ui = { workspace = true, optional = true }
 editor.workspace = true
@@ -53,7 +54,7 @@ regex.workspace = true
 platform_title_bar.workspace = true
 project.workspace = true
 release_channel.workspace = true
-rodio.workspace = true
+rodio = { workspace = true, optional = true }
 schemars.workspace = true
 search.workspace = true
 serde.workspace = true

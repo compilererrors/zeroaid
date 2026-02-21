@@ -52,6 +52,7 @@ use crate::components::{
 };
 #[cfg(feature = "ai")]
 use crate::components::render_ollama_model_picker;
+#[cfg(feature = "collab")]
 use crate::pages::{render_input_audio_device_dropdown, render_output_audio_device_dropdown};
 
 const NAVBAR_CONTAINER_TAB_INDEX: isize = 0;
@@ -566,10 +567,13 @@ fn init_renderers(cx: &mut App) {
         .add_basic_renderer::<settings::SemanticTokens>(render_dropdown)
         .add_basic_renderer::<settings::DocumentFoldingRanges>(render_dropdown)
         .add_basic_renderer::<settings::DocumentSymbols>(render_dropdown)
-        .add_basic_renderer::<settings::AudioInputDeviceName>(render_input_audio_device_dropdown)
-        .add_basic_renderer::<settings::AudioOutputDeviceName>(render_output_audio_device_dropdown)
         // please semicolon stay on next line
         ;
+
+    #[cfg(feature = "collab")]
+    renderers
+        .add_basic_renderer::<settings::AudioInputDeviceName>(render_input_audio_device_dropdown)
+        .add_basic_renderer::<settings::AudioOutputDeviceName>(render_output_audio_device_dropdown);
 }
 
 pub fn open_settings_editor(

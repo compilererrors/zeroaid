@@ -19,6 +19,7 @@ use agent_ui::{AgentDiffToolbar, AgentPanelDelegate};
 use anyhow::Context as _;
 pub use app_menus::*;
 use assets::Assets;
+#[cfg(feature = "audio")]
 use audio::{AudioSettings, REPLAY_DURATION};
 use breadcrumbs::Breadcrumbs;
 use client::zed_urls;
@@ -75,6 +76,7 @@ use settings::{
     update_settings_file,
 };
 use sidebar::Sidebar;
+#[cfg(feature = "audio")]
 use std::time::Duration;
 use std::{
     borrow::Cow,
@@ -90,9 +92,9 @@ use util::rel_path::RelPath;
 use util::{ResultExt, asset_str, maybe};
 use uuid::Uuid;
 use vim_mode_setting::VimModeSetting;
-use workspace::notifications::{
-    NotificationId, SuppressEvent, dismiss_app_notification, show_app_notification,
-};
+use workspace::notifications::{NotificationId, dismiss_app_notification, show_app_notification};
+#[cfg(feature = "audio")]
+use workspace::notifications::SuppressEvent;
 
 #[cfg(feature = "ai")]
 use workspace::Panel;
@@ -101,9 +103,10 @@ use workspace::{
     create_and_open_local_file, notifications::simple_message_notification::MessageNotification,
     open_new,
 };
+#[cfg(feature = "audio")]
+use workspace::NotificationFrame;
 use workspace::{
-    CloseIntent, CloseProject, CloseWindow, NotificationFrame, RestoreBanner,
-    with_active_or_new_workspace,
+    CloseIntent, CloseProject, CloseWindow, RestoreBanner, with_active_or_new_workspace,
 };
 use workspace::{Pane, notifications::DetachAndPromptErr};
 use zed_actions::{
@@ -2180,6 +2183,7 @@ fn open_settings_file(
     .detach_and_log_err(cx);
 }
 
+#[cfg(feature = "audio")]
 fn capture_recent_audio(workspace: &mut Workspace, _: &mut Window, cx: &mut Context<Workspace>) {
     struct CaptureRecentAudioNotification {
         focus_handle: gpui::FocusHandle,
@@ -2255,6 +2259,19 @@ fn capture_recent_audio(workspace: &mut Workspace, _: &mut Window, cx: &mut Cont
         NotificationId::unique::<CaptureRecentAudioNotification>(),
         cx,
         |cx| cx.new(CaptureRecentAudioNotification::new),
+    );
+}
+
+#[cfg(not(feature = "audio"))]
+fn capture_recent_audio(workspace: &mut Workspace, _: &mut Window, cx: &mut Context<Workspace>) {
+    struct CaptureRecentAudioDisabled;
+
+    workspace.show_toast(
+        Toast::new(
+            NotificationId::unique::<CaptureRecentAudioDisabled>(),
+            "Audio capture is unavailable in this build.",
+        ),
+        cx,
     );
 }
 
@@ -5078,6 +5095,7 @@ mod tests {
 
             gpui_tokio::init(cx);
             theme::init(theme::LoadThemes::JustBase, cx);
+            #[cfg(feature = "audio")]
             audio::init(cx);
             channel::init(&app_state.client, app_state.user_store.clone(), cx);
             call::init(app_state.client.clone(), app_state.user_store.clone(), cx);
