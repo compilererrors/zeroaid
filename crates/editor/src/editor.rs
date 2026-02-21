@@ -6334,7 +6334,7 @@ impl Editor {
         self.completion_tasks.push((id, task));
     }
 
-    #[cfg(any(test, feature = "test-support"))]
+    #[cfg(feature = "test-support")]
     pub fn current_completions(&self) -> Option<Vec<project::Completion>> {
         let menu = self.context_menu.borrow();
         if let CodeContextMenu::Completions(menu) = menu.as_ref()? {
@@ -13821,7 +13821,7 @@ impl Editor {
                                 let language = snapshot.language_at(selection.head());
                                 let range = selection.range();
                                 if let Some(language) = language
-                                    && language.name() == "Markdown"
+                                    && language.name() == "Markdown".into()
                                 {
                                     edit_for_markdown_paste(
                                         &snapshot,
@@ -13880,30 +13880,16 @@ impl Editor {
 
                     let mut edits = Vec::new();
 
-                    // When pasting text without metadata (e.g. copied from an
-                    // external editor using multiple cursors) and the number of
-                    // lines matches the number of selections, distribute one
-                    // line per cursor instead of pasting the whole text at each.
-                    let lines: Vec<&str> = clipboard_text.split('\n').collect();
-                    let distribute_lines =
-                        old_selections.len() > 1 && lines.len() == old_selections.len();
-
-                    for (ix, selection) in old_selections.iter().enumerate() {
+                    for selection in old_selections.iter() {
                         let language = snapshot.language_at(selection.head());
                         let range = selection.range();
 
-                        let text_for_cursor: &str = if distribute_lines {
-                            lines[ix]
-                        } else {
-                            &clipboard_text
-                        };
-
                         let (edit_range, edit_text) = if let Some(language) = language
-                            && language.name() == "Markdown"
+                            && language.name() == "Markdown".into()
                         {
-                            edit_for_markdown_paste(&snapshot, range, text_for_cursor, url.clone())
+                            edit_for_markdown_paste(&snapshot, range, &clipboard_text, url.clone())
                         } else {
-                            (range, Cow::Borrowed(text_for_cursor))
+                            (range, clipboard_text.clone())
                         };
 
                         edits.push((edit_range, edit_text));
@@ -23587,7 +23573,7 @@ impl Editor {
             .insert(TypeId::of::<T>(), (color_fetcher, gutter_highlights));
     }
 
-    #[cfg(any(test, feature = "test-support"))]
+    #[cfg(feature = "test-support")]
     pub fn all_text_highlights(
         &self,
         window: &mut Window,
@@ -23611,7 +23597,7 @@ impl Editor {
         })
     }
 
-    #[cfg(any(test, feature = "test-support"))]
+    #[cfg(feature = "test-support")]
     pub fn all_text_background_highlights(
         &self,
         window: &mut Window,
@@ -23641,7 +23627,7 @@ impl Editor {
         res
     }
 
-    #[cfg(any(test, feature = "test-support"))]
+    #[cfg(feature = "test-support")]
     pub fn search_background_highlights(&mut self, cx: &mut Context<Self>) -> Vec<Range<Point>> {
         let snapshot = self.buffer().read(cx).snapshot(cx);
 

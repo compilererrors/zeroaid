@@ -39,48 +39,33 @@ pub struct FindPathToolInput {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum FindPathToolOutput {
-    Success {
-        offset: usize,
-        current_matches_page: Vec<PathBuf>,
-        all_matches_len: usize,
-    },
-    Error {
-        error: String,
-    },
+pub struct FindPathToolOutput {
+    offset: usize,
+    current_matches_page: Vec<PathBuf>,
+    all_matches_len: usize,
 }
 
 impl From<FindPathToolOutput> for LanguageModelToolResultContent {
     fn from(output: FindPathToolOutput) -> Self {
-        match output {
-            FindPathToolOutput::Success {
-                offset,
-                current_matches_page,
-                all_matches_len,
-            } => {
-                if current_matches_page.is_empty() {
-                    "No matches found".into()
-                } else {
-                    let mut llm_output = format!("Found {} total matches.", all_matches_len);
-                    if all_matches_len > RESULTS_PER_PAGE {
-                        write!(
-                            &mut llm_output,
-                            "\nShowing results {}-{} (provide 'offset' parameter for more results):",
-                            offset + 1,
-                            offset + current_matches_page.len()
-                        )
-                        .ok();
-                    }
-
-                    for mat in current_matches_page {
-                        write!(&mut llm_output, "\n{}", mat.display()).ok();
-                    }
-
-                    llm_output.into()
-                }
+        if output.current_matches_page.is_empty() {
+            "No matches found".into()
+        } else {
+            let mut llm_output = format!("Found {} total matches.", output.all_matches_len);
+            if output.all_matches_len > RESULTS_PER_PAGE {
+                write!(
+                    &mut llm_output,
+                    "\nShowing results {}-{} (provide 'offset' parameter for more results):",
+                    output.offset + 1,
+                    output.offset + output.current_matches_page.len()
+                )
+                .unwrap();
             }
-            FindPathToolOutput::Error { error } => error.into(),
+
+            for mat in output.current_matches_page {
+                write!(&mut llm_output, "\n{}", mat.display()).unwrap();
+            }
+
+            llm_output.into()
         }
     }
 }
@@ -124,14 +109,14 @@ impl AgentTool for FindPathTool {
         input: Self::Input,
         event_stream: ToolCallEventStream,
         cx: &mut App,
-    ) -> Task<Result<Self::Output, Self::Output>> {
+    ) -> Task<Result<FindPathToolOutput>> {
         let search_paths_task = search_paths(&input.glob, self.project.clone(), cx);
 
         cx.background_spawn(async move {
             let matches = futures::select! {
-                result = search_paths_task.fuse() => result.map_err(|e| FindPathToolOutput::Error { error: e.to_string() })?,
+                result = search_paths_task.fuse() => result?,
                 _ = event_stream.cancelled_by_user().fuse() => {
-                    return Err(FindPathToolOutput::Error { error: "Path search cancelled by user".to_string() });
+                    anyhow::bail!("Path search cancelled by user");
                 }
             };
             let paginated_matches: &[PathBuf] = &matches[cmp::min(input.offset, matches.len())
@@ -161,7 +146,7 @@ impl AgentTool for FindPathTool {
                     ),
             );
 
-            Ok(FindPathToolOutput::Success {
+            Ok(FindPathToolOutput {
                 offset: input.offset,
                 current_matches_page: paginated_matches.to_vec(),
                 all_matches_len: matches.len(),

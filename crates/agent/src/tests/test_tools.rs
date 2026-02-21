@@ -1,5 +1,6 @@
 use super::*;
 use agent_settings::AgentSettings;
+use anyhow::Result;
 use gpui::{App, SharedString, Task};
 use std::future;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -36,7 +37,7 @@ impl AgentTool for EchoTool {
         input: Self::Input,
         _event_stream: ToolCallEventStream,
         _cx: &mut App,
-    ) -> Task<Result<String, String>> {
+    ) -> Task<Result<String>> {
         Task::ready(Ok(input.text))
     }
 }
@@ -77,7 +78,7 @@ impl AgentTool for DelayTool {
         input: Self::Input,
         _event_stream: ToolCallEventStream,
         cx: &mut App,
-    ) -> Task<Result<String, String>>
+    ) -> Task<Result<String>>
     where
         Self: Sized,
     {
@@ -117,14 +118,14 @@ impl AgentTool for ToolRequiringPermission {
         _input: Self::Input,
         event_stream: ToolCallEventStream,
         cx: &mut App,
-    ) -> Task<Result<String, String>> {
+    ) -> Task<Result<String>> {
         let settings = AgentSettings::get_global(cx);
         let decision = decide_permission_from_settings(Self::NAME, &[String::new()], settings);
 
         let authorize = match decision {
             ToolPermissionDecision::Allow => None,
             ToolPermissionDecision::Deny(reason) => {
-                return Task::ready(Err(reason));
+                return Task::ready(Err(anyhow::anyhow!("{}", reason)));
             }
             ToolPermissionDecision::Confirm => {
                 let context = crate::ToolPermissionContext::new(
@@ -137,7 +138,7 @@ impl AgentTool for ToolRequiringPermission {
 
         cx.foreground_executor().spawn(async move {
             if let Some(authorize) = authorize {
-                authorize.await.map_err(|e| e.to_string())?;
+                authorize.await?;
             }
             Ok("Allowed".to_string())
         })
@@ -172,7 +173,7 @@ impl AgentTool for InfiniteTool {
         _input: Self::Input,
         _event_stream: ToolCallEventStream,
         cx: &mut App,
-    ) -> Task<Result<String, String>> {
+    ) -> Task<Result<String>> {
         cx.foreground_executor().spawn(async move {
             future::pending::<()>().await;
             unreachable!()
@@ -224,12 +225,12 @@ impl AgentTool for CancellationAwareTool {
         _input: Self::Input,
         event_stream: ToolCallEventStream,
         cx: &mut App,
-    ) -> Task<Result<String, String>> {
+    ) -> Task<Result<String>> {
         cx.foreground_executor().spawn(async move {
             // Wait for cancellation - this tool does nothing but wait to be cancelled
             event_stream.cancelled_by_user().await;
             self.was_cancelled.store(true, Ordering::SeqCst);
-            Err("Tool cancelled by user".to_string())
+            anyhow::bail!("Tool cancelled by user");
         })
     }
 }
@@ -279,7 +280,7 @@ impl AgentTool for WordListTool {
         _input: Self::Input,
         _event_stream: ToolCallEventStream,
         _cx: &mut App,
-    ) -> Task<Result<String, String>> {
+    ) -> Task<Result<String>> {
         Task::ready(Ok("ok".to_string()))
     }
 }

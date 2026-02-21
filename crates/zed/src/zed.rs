@@ -3763,7 +3763,7 @@ mod tests {
                             .language_at(MultiBufferOffset(0), cx)
                             .unwrap()
                             .name(),
-                        "Rust"
+                        "Rust".into()
                     );
                 });
             })
@@ -3911,7 +3911,7 @@ mod tests {
                             .language_at(MultiBufferOffset(0), cx)
                             .unwrap()
                             .name(),
-                        "Rust"
+                        "Rust".into()
                     )
                 });
             })

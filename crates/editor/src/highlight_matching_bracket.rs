@@ -11,10 +11,11 @@ impl Editor {
         snapshot: &DisplaySnapshot,
         cx: &mut Context<Editor>,
     ) {
+        self.clear_highlights(HighlightKey::MatchingBracket, cx);
+
         let newest_selection = self.selections.newest::<MultiBufferOffset>(&snapshot);
         // Don't highlight brackets if the selection isn't empty
         if !newest_selection.is_empty() {
-            self.clear_highlights(HighlightKey::MatchingBracket, cx);
             return;
         }
 
@@ -39,32 +40,16 @@ impl Editor {
         });
         self.refresh_matching_bracket_highlights_task = cx.spawn({
             let buffer_snapshot = buffer_snapshot.clone();
-            async move |this, cx| {
-                let bracket_ranges = task.await;
-                let current_ranges = this
-                    .read_with(cx, |editor, cx| {
-                        editor
-                            .display_map
-                            .read(cx)
-                            .text_highlights(HighlightKey::MatchingBracket)
-                            .map(|(_, ranges)| ranges.to_vec())
-                    })
-                    .ok()
-                    .flatten();
-                let new_ranges = bracket_ranges.map(|(opening_range, closing_range)| {
-                    vec![
-                        opening_range.to_anchors(&buffer_snapshot),
-                        closing_range.to_anchors(&buffer_snapshot),
-                    ]
-                });
-
-                if current_ranges != new_ranges {
-                    this.update(cx, |editor, cx| {
-                        editor.clear_highlights(HighlightKey::MatchingBracket, cx);
-                        if let Some(new_ranges) = new_ranges {
+            async move |editor, cx| {
+                if let Some((opening_range, closing_range)) = task.await {
+                    editor
+                        .update(cx, |editor, cx| {
                             editor.highlight_text(
                                 HighlightKey::MatchingBracket,
-                                new_ranges,
+                                vec![
+                                    opening_range.to_anchors(&buffer_snapshot),
+                                    closing_range.to_anchors(&buffer_snapshot),
+                                ],
                                 HighlightStyle {
                                     background_color: Some(
                                         cx.theme()
@@ -75,9 +60,8 @@ impl Editor {
                                 },
                                 cx,
                             )
-                        }
-                    })
-                    .ok();
+                        })
+                        .ok();
                 }
             }
         });

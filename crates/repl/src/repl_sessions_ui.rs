@@ -106,7 +106,7 @@ pub fn init(cx: &mut App) {
                 let editor_handle = cx.entity().downgrade();
 
                 if let Some(language) = language
-                    && language.name() == "Python"
+                    && language.name() == "Python".into()
                     && let (Some(project_path), Some(project)) = (project_path, project)
                 {
                     let store = ReplStore::global(cx);

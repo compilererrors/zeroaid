@@ -1,5 +1,6 @@
 use agent_client_protocol as acp;
 use agent_settings::AgentSettings;
+use anyhow::Result;
 use collections::FxHashSet;
 use futures::FutureExt as _;
 use gpui::{App, Entity, SharedString, Task};
@@ -66,7 +67,7 @@ impl AgentTool for SaveFileTool {
         input: Self::Input,
         event_stream: ToolCallEventStream,
         cx: &mut App,
-    ) -> Task<Result<String, String>> {
+    ) -> Task<Result<String>> {
         let settings = AgentSettings::get_global(cx).clone();
 
         // Check for any immediate deny before spawning async work.
@@ -74,7 +75,7 @@ impl AgentTool for SaveFileTool {
             let path_str = path.to_string_lossy();
             let decision = decide_permission_for_path(Self::NAME, &path_str, &settings);
             if let ToolPermissionDecision::Deny(reason) = decision {
-                return Task::ready(Err(reason));
+                return Task::ready(Err(anyhow::anyhow!("{}", reason)));
             }
         }
 
@@ -108,7 +109,7 @@ impl AgentTool for SaveFileTool {
                         }
                     }
                     ToolPermissionDecision::Deny(reason) => {
-                        return Err(reason);
+                        return Err(anyhow::anyhow!("{}", reason));
                     }
                     ToolPermissionDecision::Confirm => {
                         if !symlink_escape {
@@ -153,7 +154,7 @@ impl AgentTool for SaveFileTool {
                 let context =
                     crate::ToolPermissionContext::new(Self::NAME, confirmation_paths.clone());
                 let authorize = cx.update(|cx| event_stream.authorize(title, context, cx));
-                authorize.await.map_err(|e| e.to_string())?;
+                authorize.await?;
             }
 
             let mut buffers_to_save: FxHashSet<Entity<Buffer>> = FxHashSet::default();
@@ -216,7 +217,7 @@ impl AgentTool for SaveFileTool {
                         }
                     }
                     _ = event_stream.cancelled_by_user().fuse() => {
-                        return Err("Save cancelled by user".to_string());
+                        anyhow::bail!("Save cancelled by user");
                     }
                 };
 
@@ -246,7 +247,7 @@ impl AgentTool for SaveFileTool {
                 let save_result = futures::select! {
                     result = save_task.fuse() => result,
                     _ = event_stream.cancelled_by_user().fuse() => {
-                        return Err("Save cancelled by user".to_string());
+                        anyhow::bail!("Save cancelled by user");
                     }
                 };
                 if let Err(error) = save_result {

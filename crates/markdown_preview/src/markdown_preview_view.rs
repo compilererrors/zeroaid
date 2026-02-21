@@ -259,7 +259,7 @@ impl MarkdownPreviewView {
         if let Some(buffer) = buffer.as_singleton()
             && let Some(language) = buffer.read(cx).language()
         {
-            return language.name() == "Markdown";
+            return language.name() == "Markdown".into();
         }
         false
     }

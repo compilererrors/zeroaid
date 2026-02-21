@@ -602,12 +602,6 @@ fn extract_diff_from_event(event: &zeta_prompt::Event) -> &str {
     }
 }
 
-fn is_predicted_event(event: &zeta_prompt::Event) -> bool {
-    match event {
-        zeta_prompt::Event::BufferChange { predicted, .. } => *predicted,
-    }
-}
-
 pub fn compute_prediction_reversal_ratio(
     prompt_inputs: &ExamplePromptInputs,
     predicted_content: &str,
@@ -618,18 +612,11 @@ pub fn compute_prediction_reversal_ratio(
     let edit_history: &[Arc<zeta_prompt::Event>] = &prompt_inputs.edit_history;
     let relevant_events = filter_edit_history_by_path(edit_history, cursor_path);
 
-    let most_recent = match relevant_events.last() {
-        Some(event) if !is_predicted_event(event) => *event,
-        _ => return 0.0,
-    };
-
-    let diff = extract_diff_from_event(most_recent);
-    if diff.is_empty() {
-        return 0.0;
-    }
-
     if let Some(excerpt_start_row) = prompt_inputs.excerpt_start_row {
-        let diffs = vec![diff];
+        let diffs: Vec<&str> = relevant_events
+            .iter()
+            .map(|e| extract_diff_from_event(e))
+            .collect();
         let overlap = compute_excerpt_aware_reversal_overlap(
             &diffs,
             current_content,
@@ -639,12 +626,21 @@ pub fn compute_prediction_reversal_ratio(
         return overlap.ratio();
     }
 
-    let reversed = reverse_diff(diff);
-    let with_headers = format!("--- a/file\n+++ b/file\n{}", reversed);
-    let original_content = match apply_diff_to_string(&with_headers, current_content) {
-        Ok(updated_content) => updated_content,
-        Err(_) => apply_diff_to_string_lenient(&reversed, current_content),
-    };
+    let mut original_content = current_content.to_string();
+    for event in relevant_events.into_iter().rev() {
+        let diff = extract_diff_from_event(event);
+        if diff.is_empty() {
+            continue;
+        }
+        let reversed = reverse_diff(diff);
+        let with_headers = format!("--- a/file\n+++ b/file\n{}", reversed);
+        match apply_diff_to_string(&with_headers, &original_content) {
+            Ok(updated_content) => original_content = updated_content,
+            Err(_) => {
+                original_content = apply_diff_to_string_lenient(&reversed, &original_content);
+            }
+        }
+    }
 
     let overlap = compute_reversal_overlap(&original_content, current_content, predicted_content);
     overlap.ratio()
@@ -1954,7 +1950,7 @@ mod tests {
     }
 
     #[test]
-    fn test_only_most_recent_edit_tracked() {
+    fn test_multiple_sequential_diffs() {
         let prompt_inputs = ExamplePromptInputs {
             content: indoc! {"
                 line1
@@ -2000,7 +1996,6 @@ mod tests {
 
         let predicted = indoc! {"
             line1
-            first_add
             line2
         "};
         let ratio =
@@ -2008,7 +2003,7 @@ mod tests {
 
         assert!(
             ratio > 0.9,
-            "Expected high reversal ratio when prediction exactly reverses the most recent edit, got {}",
+            "Expected high reversal ratio when reversing multiple sequential edits, got {}",
             ratio
         );
     }

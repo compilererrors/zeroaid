@@ -22,7 +22,7 @@ use crate::{
 };
 
 fn is_rust_language(language: &Language) -> bool {
-    language.name() == "Rust"
+    language.name() == "Rust".into()
 }
 
 pub fn apply_related_actions(editor: &Entity<Editor>, window: &mut Window, cx: &mut App) {
