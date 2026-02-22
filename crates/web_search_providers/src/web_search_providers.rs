@@ -18,15 +18,19 @@ fn register_web_search_providers(
     client: Arc<Client>,
     cx: &mut Context<WebSearchRegistry>,
 ) {
+    let Some(language_model_registry) = LanguageModelRegistry::try_global(cx) else {
+        return;
+    };
+
     register_zed_web_search_provider(
         registry,
         client.clone(),
-        &LanguageModelRegistry::global(cx),
+        &language_model_registry,
         cx,
     );
 
     cx.subscribe(
-        &LanguageModelRegistry::global(cx),
+        &language_model_registry,
         move |this, registry, event, cx| {
             if let language_model::Event::DefaultModelChanged = event {
                 register_zed_web_search_provider(this, client.clone(), &registry, cx)

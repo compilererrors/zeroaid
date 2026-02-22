@@ -7,10 +7,14 @@ OUTPUT_FILE="${1:-$(pwd)/assets/licenses.md}"
 TEMPLATE_FILE="script/licenses/template.md.hbs"
 
 fail_on_stderr() {
-    local tmpfile=$(mktemp)
-    "$@" 2> >(tee "$tmpfile" >&2)
+    local tmpfile
+    tmpfile=$(mktemp)
+    "$@" 2>"$tmpfile"
     local rc=$?
-    [ -s "$tmpfile" ] && rc=1
+    if [ -s "$tmpfile" ]; then
+        cat "$tmpfile" >&2
+        rc=1
+    fi
     rm "$tmpfile"
     return $rc
 }

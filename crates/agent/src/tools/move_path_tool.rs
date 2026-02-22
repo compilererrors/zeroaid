@@ -5,6 +5,7 @@ use super::tool_permissions::{
 use crate::{AgentTool, ToolCallEventStream, ToolPermissionDecision, decide_permission_for_paths};
 use agent_client_protocol::ToolKind;
 use agent_settings::AgentSettings;
+use anyhow::{Context as _, Result, anyhow};
 use futures::FutureExt as _;
 use gpui::{App, Entity, SharedString, Task};
 use project::Project;
@@ -95,12 +96,12 @@ impl AgentTool for MovePathTool {
         input: Self::Input,
         event_stream: ToolCallEventStream,
         cx: &mut App,
-    ) -> Task<Result<Self::Output, Self::Output>> {
+    ) -> Task<Result<Self::Output>> {
         let settings = AgentSettings::get_global(cx);
         let paths = vec![input.source_path.clone(), input.destination_path.clone()];
         let decision = decide_permission_for_paths(Self::NAME, &paths, settings);
         if let ToolPermissionDecision::Deny(reason) = decision {
-            return Task::ready(Err(reason));
+            return Task::ready(Err(anyhow!("{}", reason)));
         }
 
         let project = self.project.clone();
@@ -159,7 +160,7 @@ impl AgentTool for MovePathTool {
             };
 
             if let Some(authorize) = authorize {
-                authorize.await.map_err(|e| e.to_string())?;
+                authorize.await?;
             }
 
             let rename_task = project.update(cx, |project, cx| {
@@ -169,24 +170,27 @@ impl AgentTool for MovePathTool {
                 {
                     Some(entity) => match project.find_project_path(&input.destination_path, cx) {
                         Some(project_path) => Ok(project.rename_entry(entity.id, project_path, cx)),
-                        None => Err(format!(
+                        None => Err(anyhow!(
                             "Destination path {} was outside the project.",
                             input.destination_path
                         )),
                     },
-                    None => Err(format!(
+                    None => Err(anyhow!(
                         "Source path {} was not found in the project.",
                         input.source_path
                     )),
                 }
             })?;
 
-            futures::select! {
-                result = rename_task.fuse() => result.map_err(|e| format!("Moving {} to {}: {e}", input.source_path, input.destination_path))?,
+            let result = futures::select! {
+                result = rename_task.fuse() => result,
                 _ = event_stream.cancelled_by_user().fuse() => {
-                    return Err("Move cancelled by user".to_string());
+                    anyhow::bail!("Move cancelled by user");
                 }
             };
+            result.with_context(|| {
+                format!("Moving {} to {}", input.source_path, input.destination_path)
+            })?;
             Ok(format!(
                 "Moved {} to {}",
                 input.source_path, input.destination_path

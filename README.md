@@ -1,3 +1,92 @@
+## Fork Notes (zeROAId)
+
+This fork is optimized for a lean default build.
+
+### Why This Fork Exists
+
+This fork was created to keep the project focused on the core text editor experience.
+The goal is a smaller build with fewer dependencies by minimizing optional extras in the default build.
+
+Current focus areas to keep minimized by default:
+
+- AI features
+- Collaboration and calls tooling
+- Audio-related features
+
+More areas may be trimmed over time if they are not needed for the core editor workflow.
+
+### What Changed in This Fork
+
+- `zed` now builds with `default = []` (no default features).
+- AI is feature-gated behind `ai`.
+- Audio is feature-gated behind `audio`.
+- Collaboration/Calls are feature-gated behind `collab`.
+- `collab` includes `audio` + `audio/webrtc`.
+- Collaboration/calls/audio settings pages are hidden when `collab` is not enabled.
+- Title bar initialization remains enabled so the top bar/UI does not disappear in lean builds.
+
+### How to Run
+
+Lean (default, without AI/collab/audio):
+
+```bash
+cargo run -p zed
+```
+
+With audio only:
+
+```bash
+cargo run -p zed --features audio
+```
+
+With AI:
+
+```bash
+cargo run -p zed --features ai
+```
+
+With collaboration/calls (includes audio + webrtc):
+
+```bash
+cargo run -p zed --features collab
+```
+
+With both AI + collaboration:
+
+```bash
+cargo run -p zed --features ai,collab
+```
+
+### Build DMG (macOS)
+
+Lean DMG (default in this fork):
+
+```bash
+script/bundle-mac
+```
+
+DMG with features:
+
+```bash
+script/bundle-mac -f audio
+script/bundle-mac -f ai
+script/bundle-mac -f collab
+script/bundle-mac -f ai,collab
+```
+
+Explicitly without default features (same effect as lean here):
+
+```bash
+script/bundle-mac -n
+```
+
+### Offline Build (optional)
+
+```bash
+CARGO_NET_OFFLINE=true cargo check -p zed --no-default-features
+CARGO_NET_OFFLINE=true script/bundle-mac
+```
+
 # Zed
 
 [![Zed](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/zed-industries/zed/main/assets/badge/v0.json)](https://zed.dev)

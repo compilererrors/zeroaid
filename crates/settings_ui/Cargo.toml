@@ -12,21 +12,32 @@ workspace = true
 path = "src/settings_ui.rs"
 
 [features]
-default = []
-test-support = []
+default = ["ai", "collab"]
+ai = [
+    "dep:agent",
+    "dep:agent_settings",
+    "dep:codestral",
+    "dep:copilot",
+    "dep:copilot_ui",
+    "dep:edit_prediction",
+    "dep:edit_prediction_ui",
+    "dep:shell_command_parser",
+]
+collab = ["dep:audio", "dep:cpal", "dep:rodio"]
+test-support = ["collab"]
 
 [dependencies]
-agent.workspace = true
-agent_settings.workspace = true
+agent = { workspace = true, optional = true }
+agent_settings = { workspace = true, optional = true }
 anyhow.workspace = true
-audio.workspace = true
+audio = { path = "../audio", default-features = false, optional = true }
 component.workspace = true
-codestral.workspace = true
-copilot.workspace = true
-copilot_ui.workspace = true
-cpal.workspace = true
-edit_prediction.workspace = true
-edit_prediction_ui.workspace = true
+codestral = { workspace = true, optional = true }
+copilot = { workspace = true, optional = true }
+copilot_ui = { workspace = true, optional = true }
+cpal = { workspace = true, optional = true }
+edit_prediction = { workspace = true, optional = true }
+edit_prediction_ui = { workspace = true, optional = true }
 editor.workspace = true
 fs.workspace = true
 futures.workspace = true
@@ -43,13 +54,13 @@ regex.workspace = true
 platform_title_bar.workspace = true
 project.workspace = true
 release_channel.workspace = true
-rodio.workspace = true
+rodio = { workspace = true, optional = true }
 schemars.workspace = true
 search.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 settings.workspace = true
-shell_command_parser.workspace = true
+shell_command_parser = { workspace = true, optional = true }
 strum.workspace = true
 telemetry.workspace = true
 theme.workspace = true

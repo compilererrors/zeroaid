@@ -1,9 +1,8 @@
 use gpui::{Action as _, App};
 use itertools::Itertools as _;
-use settings::{
-    AudioInputDeviceName, AudioOutputDeviceName, LanguageSettingsContent, SemanticTokens,
-    SettingsContent,
-};
+#[cfg(feature = "collab")]
+use settings::{AudioInputDeviceName, AudioOutputDeviceName};
+use settings::{LanguageSettingsContent, SemanticTokens, SettingsContent};
 use std::sync::{Arc, OnceLock};
 use strum::{EnumMessage, IntoDiscriminant as _, VariantArray};
 use ui::IntoElement;
@@ -11,20 +10,24 @@ use ui::IntoElement;
 use crate::{
     ActionLink, DynamicItem, PROJECT, SettingField, SettingItem, SettingsFieldMetadata,
     SettingsPage, SettingsPageItem, SubPageLink, USER, active_language, all_language_names,
-    pages::{
-        open_audio_test_window, render_edit_prediction_setup_page,
-        render_tool_permissions_setup_page,
-    },
 };
+#[cfg(feature = "collab")]
+use crate::pages::open_audio_test_window;
+#[cfg(feature = "ai")]
+use crate::pages::{render_edit_prediction_setup_page, render_tool_permissions_setup_page};
 
 const DEFAULT_STRING: String = String::new();
 /// A default empty string reference. Useful in `pick` functions for cases either in dynamic item fields, or when dealing with `settings::Maybe`
 /// to avoid the "NO DEFAULT" case.
 const DEFAULT_EMPTY_STRING: Option<&String> = Some(&DEFAULT_STRING);
 
+#[cfg(feature = "collab")]
 const DEFAULT_AUDIO_OUTPUT: AudioOutputDeviceName = AudioOutputDeviceName(None);
+#[cfg(feature = "collab")]
 const DEFAULT_EMPTY_AUDIO_OUTPUT: Option<&AudioOutputDeviceName> = Some(&DEFAULT_AUDIO_OUTPUT);
+#[cfg(feature = "collab")]
 const DEFAULT_AUDIO_INPUT: AudioInputDeviceName = AudioInputDeviceName(None);
+#[cfg(feature = "collab")]
 const DEFAULT_EMPTY_AUDIO_INPUT: Option<&AudioInputDeviceName> = Some(&DEFAULT_AUDIO_INPUT);
 
 macro_rules! concat_sections {
@@ -61,7 +64,7 @@ macro_rules! concat_sections {
 }
 
 pub(crate) fn settings_data(cx: &App) -> Vec<SettingsPage> {
-    vec![
+    let mut pages = vec![
         general_page(),
         appearance_page(),
         keymap_page(),
@@ -73,10 +76,13 @@ pub(crate) fn settings_data(cx: &App) -> Vec<SettingsPage> {
         debugger_page(),
         terminal_page(),
         version_control_page(),
-        collaboration_page(),
-        ai_page(),
-        network_page(),
-    ]
+    ];
+    #[cfg(feature = "collab")]
+    pages.push(collaboration_page());
+    #[cfg(feature = "ai")]
+    pages.push(ai_page());
+    pages.push(network_page());
+    pages
 }
 
 fn general_page() -> SettingsPage {
@@ -2964,10 +2970,16 @@ fn languages_and_tools_page(cx: &App) -> SettingsPage {
                     in_json: true,
                     files: USER | PROJECT,
                     render: |this, scroll_handle, window, cx| {
+                        #[cfg(feature = "ai")]
                         let items: Box<[SettingsPageItem]> = concat_sections!(
                             language_settings_data(),
                             non_editor_language_settings_data(),
                             edit_prediction_language_settings_section()
+                        );
+                        #[cfg(not(feature = "ai"))]
+                        let items: Box<[SettingsPageItem]> = concat_sections!(
+                            language_settings_data(),
+                            non_editor_language_settings_data()
                         );
                         this.render_sub_page_items(
                             items.iter().enumerate(),
@@ -5277,6 +5289,7 @@ fn panels_page() -> SettingsPage {
         ]
     }
 
+    #[cfg(feature = "collab")]
     fn collaboration_panel_section() -> [SettingsPageItem; 4] {
         [
             SettingsPageItem::SectionHeader("Collaboration Panel"),
@@ -5410,19 +5423,34 @@ fn panels_page() -> SettingsPage {
         ]
     }
 
+    #[cfg(feature = "collab")]
+    let items = concat_sections![
+        project_panel_section(),
+        auto_open_files_section(),
+        terminal_panel_section(),
+        outline_panel_section(),
+        git_panel_section(),
+        debugger_panel_section(),
+        notification_panel_section(),
+        collaboration_panel_section(),
+        agent_panel_section(),
+    ];
+
+    #[cfg(not(feature = "collab"))]
+    let items = concat_sections![
+        project_panel_section(),
+        auto_open_files_section(),
+        terminal_panel_section(),
+        outline_panel_section(),
+        git_panel_section(),
+        debugger_panel_section(),
+        notification_panel_section(),
+        agent_panel_section(),
+    ];
+
     SettingsPage {
         title: "Panels",
-        items: concat_sections![
-            project_panel_section(),
-            auto_open_files_section(),
-            terminal_panel_section(),
-            outline_panel_section(),
-            git_panel_section(),
-            debugger_panel_section(),
-            notification_panel_section(),
-            collaboration_panel_section(),
-            agent_panel_section(),
-        ],
+        items,
     }
 }
 
@@ -6736,6 +6764,7 @@ fn version_control_page() -> SettingsPage {
     }
 }
 
+#[cfg(feature = "collab")]
 fn collaboration_page() -> SettingsPage {
     fn calls_section() -> [SettingsPageItem; 3] {
         [
@@ -6930,6 +6959,7 @@ fn collaboration_page() -> SettingsPage {
     }
 }
 
+#[cfg(feature = "ai")]
 fn ai_page() -> SettingsPage {
     fn general_section() -> [SettingsPageItem; 2] {
         [
@@ -8916,6 +8946,7 @@ fn non_editor_language_settings_data() -> Box<[SettingsPageItem]> {
     )
 }
 
+#[cfg(feature = "ai")]
 fn edit_prediction_language_settings_section() -> [SettingsPageItem; 4] {
     [
         SettingsPageItem::SectionHeader("Edit Predictions"),

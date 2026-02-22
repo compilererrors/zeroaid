@@ -145,7 +145,27 @@ impl DevelopmentCredentialsProvider {
 
     fn save_credentials(&self, credentials: &HashMap<String, (String, Vec<u8>)>) -> Result<()> {
         let json = serde_json::to_string(credentials)?;
-        std::fs::write(&self.path, json)?;
+        #[cfg(unix)]
+        {
+            use std::fs::OpenOptions;
+            use std::io::Write as _;
+            use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
+
+            let mut file = OpenOptions::new()
+                .create(true)
+                .truncate(true)
+                .write(true)
+                .mode(0o600)
+                .open(&self.path)?;
+            file.write_all(json.as_bytes())?;
+            file.sync_all()?;
+            std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(0o600))?;
+        }
+
+        #[cfg(not(unix))]
+        {
+            std::fs::write(&self.path, json)?;
+        }
 
         Ok(())
     }

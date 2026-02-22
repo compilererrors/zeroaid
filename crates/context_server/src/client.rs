@@ -265,7 +265,7 @@ impl Client {
         let mut receiver = transport.receive();
 
         while let Some(message) = receiver.next().await {
-            log::trace!("recv: {}", &message);
+            log::trace!("recv message ({} bytes)", message.len());
             if let Ok(request) = serde_json::from_str::<AnyRequest>(&message) {
                 let mut request_handlers = request_handlers.lock();
                 if let Some(handler) = request_handlers.get_mut(request.method) {
@@ -288,7 +288,7 @@ impl Client {
                     cx,
                 )
             } else {
-                log::error!("Unhandled JSON from context_server: {}", message);
+                log::error!("Unhandled JSON from context_server ({} bytes)", message.len());
             }
         }
 
@@ -301,7 +301,7 @@ impl Client {
     /// Continuously reads and logs any error messages from the server.
     async fn handle_err(transport: Arc<dyn Transport>) -> anyhow::Result<()> {
         while let Some(err) = transport.receive_err().next().await {
-            log::debug!("context server stderr: {}", err.trim());
+            log::debug!("context server stderr ({} bytes)", err.trim().len());
         }
 
         Ok(())
@@ -323,7 +323,7 @@ impl Client {
             }
         });
         while let Ok(message) = outbound_rx.recv().await {
-            log::trace!("outgoing message: {}", message);
+            log::trace!("outgoing message ({} bytes)", message.len());
             transport.send(message).await?;
         }
         drop(output_done_tx);

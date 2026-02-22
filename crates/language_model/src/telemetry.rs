@@ -4,8 +4,14 @@ use anyhow::{Context as _, anyhow};
 use gpui::BackgroundExecutor;
 use http_client::{AsyncBody, HttpClient, Method, Request as HttpRequest};
 use std::env;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use util::ResultExt;
+
+static ZED_ENABLE_MODEL_PROVIDER_TELEMETRY: LazyLock<bool> = LazyLock::new(|| {
+    std::env::var("ZED_ENABLE_MODEL_PROVIDER_TELEMETRY").is_ok_and(|value| {
+        !value.is_empty() && value != "0" && !value.eq_ignore_ascii_case("false")
+    })
+});
 
 #[derive(Clone, Debug)]
 pub struct AnthropicEventData {
@@ -79,6 +85,9 @@ impl AnthropicEventReporter {
     }
 
     pub fn report(&self, event: AnthropicEventData) {
+        if !*ZED_ENABLE_MODEL_PROVIDER_TELEMETRY {
+            return;
+        }
         if !self.is_anthropic {
             return;
         }

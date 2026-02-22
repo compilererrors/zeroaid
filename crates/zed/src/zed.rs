@@ -1,4 +1,5 @@
 mod app_menus;
+#[cfg(feature = "ai")]
 pub mod edit_prediction_registry;
 #[cfg(target_os = "macos")]
 pub(crate) mod mac_only_instance;
@@ -13,10 +14,12 @@ pub mod visual_tests;
 #[cfg(target_os = "windows")]
 pub(crate) mod windows_only_instance;
 
+#[cfg(feature = "ai")]
 use agent_ui::{AgentDiffToolbar, AgentPanelDelegate};
 use anyhow::Context as _;
 pub use app_menus::*;
 use assets::Assets;
+#[cfg(feature = "audio")]
 use audio::{AudioSettings, REPLAY_DURATION};
 use breadcrumbs::Breadcrumbs;
 use client::zed_urls;
@@ -32,11 +35,13 @@ use futures::{StreamExt, channel::mpsc, select_biased};
 use git_ui::commit_view::CommitViewToolbar;
 use git_ui::git_panel::GitPanel;
 use git_ui::project_diff::{BranchDiffToolbar, ProjectDiffToolbar};
+#[cfg(feature = "ai")]
+use gpui::AsyncWindowContext;
 use gpui::{
-    Action, App, AppContext as _, AsyncWindowContext, Context, DismissEvent, Element, Entity,
-    Focusable, KeyBinding, ParentElement, PathPromptOptions, PromptLevel, ReadGlobal, SharedString,
-    Task, TitlebarOptions, UpdateGlobal, WeakEntity, Window, WindowHandle, WindowKind,
-    WindowOptions, actions, image_cache, point, px, retain_all,
+    Action, App, AppContext as _, Context, DismissEvent, Element, Entity, Focusable, KeyBinding,
+    ParentElement, PathPromptOptions, PromptLevel, ReadGlobal, SharedString, Task, TitlebarOptions,
+    UpdateGlobal, WeakEntity, Window, WindowHandle, WindowKind, WindowOptions, actions,
+    image_cache, point, px, retain_all,
 };
 use image_viewer::ImageInfo;
 use language::Capability;
@@ -54,7 +59,9 @@ use paths::{
     local_debug_file_relative_path, local_settings_file_relative_path,
     local_tasks_file_relative_path,
 };
-use project::{DirectoryLister, DisableAiSettings, ProjectItem};
+#[cfg(feature = "ai")]
+use project::DisableAiSettings;
+use project::{DirectoryLister, ProjectItem};
 use project_panel::ProjectPanel;
 use prompt_store::PromptBuilder;
 use quick_action_bar::QuickActionBar;
@@ -69,6 +76,7 @@ use settings::{
     update_settings_file,
 };
 use sidebar::Sidebar;
+#[cfg(feature = "audio")]
 use std::time::Duration;
 use std::{
     borrow::Cow,
@@ -84,18 +92,21 @@ use util::rel_path::RelPath;
 use util::{ResultExt, asset_str, maybe};
 use uuid::Uuid;
 use vim_mode_setting::VimModeSetting;
-use workspace::notifications::{
-    NotificationId, SuppressEvent, dismiss_app_notification, show_app_notification,
-};
+use workspace::notifications::{NotificationId, dismiss_app_notification, show_app_notification};
+#[cfg(feature = "audio")]
+use workspace::notifications::SuppressEvent;
 
+#[cfg(feature = "ai")]
+use workspace::Panel;
 use workspace::{
-    AppState, MultiWorkspace, NewFile, NewWindow, OpenLog, Panel, Toast, Workspace,
-    WorkspaceSettings, create_and_open_local_file,
-    notifications::simple_message_notification::MessageNotification, open_new,
+    AppState, MultiWorkspace, NewFile, NewWindow, OpenLog, Toast, Workspace, WorkspaceSettings,
+    create_and_open_local_file, notifications::simple_message_notification::MessageNotification,
+    open_new,
 };
+#[cfg(feature = "audio")]
+use workspace::NotificationFrame;
 use workspace::{
-    CloseIntent, CloseProject, CloseWindow, NotificationFrame, RestoreBanner,
-    with_active_or_new_workspace,
+    CloseIntent, CloseProject, CloseWindow, RestoreBanner, with_active_or_new_workspace,
 };
 use workspace::{Pane, notifications::DetachAndPromptErr};
 use zed_actions::{
@@ -423,7 +434,9 @@ pub fn initialize_workspace(
             }
         }
 
+        #[cfg(feature = "ai")]
         let edit_prediction_menu_handle = PopoverMenuHandle::default();
+        #[cfg(feature = "ai")]
         let edit_prediction_ui = cx.new(|cx| {
             edit_prediction_ui::EditPredictionButton::new(
                 app_state.fs.clone(),
@@ -433,6 +446,7 @@ pub fn initialize_workspace(
                 cx,
             )
         });
+        #[cfg(feature = "ai")]
         workspace.register_action({
             move |_, _: &edit_prediction_ui::ToggleMenu, window, cx| {
                 edit_prediction_menu_handle.toggle(window, cx);
@@ -475,6 +489,7 @@ pub fn initialize_workspace(
             status_bar.add_left_item(lsp_button, window, cx);
             status_bar.add_left_item(diagnostic_summary, window, cx);
             status_bar.add_left_item(activity_indicator, window, cx);
+            #[cfg(feature = "ai")]
             status_bar.add_right_item(edit_prediction_ui, window, cx);
             status_bar.add_right_item(active_buffer_encoding, window, cx);
             status_bar.add_right_item(active_buffer_language, window, cx);
@@ -621,25 +636,53 @@ fn initialize_panels(
     window: &mut Window,
     cx: &mut Context<Workspace>,
 ) {
+    #[cfg(not(feature = "ai"))]
+    let _ = &prompt_builder;
+
     cx.spawn_in(window, async move |workspace_handle, cx| {
         let project_panel = ProjectPanel::load(workspace_handle.clone(), cx.clone());
         let outline_panel = OutlinePanel::load(workspace_handle.clone(), cx.clone());
         let terminal_panel = TerminalPanel::load(workspace_handle.clone(), cx.clone());
         let git_panel = GitPanel::load(workspace_handle.clone(), cx.clone());
+        let debug_panel = DebugPanel::load(workspace_handle.clone(), cx);
+        #[cfg(feature = "collab")]
         let channels_panel =
-            collab_ui::collab_panel::CollabPanel::load(workspace_handle.clone(), cx.clone());
+            collab_ui::collab_panel::CollabPanel::load(workspace_handle.clone(), cx.clone())
+                .map(|result| result.map(Some));
+        #[cfg(not(feature = "collab"))]
+        let channels_panel = futures::future::ready(Ok(None::<Entity<ProjectPanel>>));
+
+        #[cfg(feature = "collab")]
         let notification_panel = collab_ui::notification_panel::NotificationPanel::load(
             workspace_handle.clone(),
             cx.clone(),
-        );
-        let debug_panel = DebugPanel::load(workspace_handle.clone(), cx);
+        )
+        .map(|result| result.map(Some));
+        #[cfg(not(feature = "collab"))]
+        let notification_panel = futures::future::ready(Ok(None::<Entity<ProjectPanel>>));
+
+        #[cfg(feature = "ai")]
+        let agent_panel =
+            initialize_agent_panel(workspace_handle.clone(), prompt_builder, cx.clone()).map(
+                |result| {
+                    result.log_err();
+                    Ok(None::<Entity<ProjectPanel>>)
+                },
+            );
+        #[cfg(not(feature = "ai"))]
+        let agent_panel = futures::future::ready(Ok(None::<Entity<ProjectPanel>>));
 
         async fn add_panel_when_ready(
-            panel_task: impl Future<Output = anyhow::Result<Entity<impl workspace::Panel>>> + 'static,
+            panel_task: impl Future<Output = anyhow::Result<Option<Entity<impl workspace::Panel>>>>
+            + 'static,
             workspace_handle: WeakEntity<Workspace>,
             mut cx: gpui::AsyncWindowContext,
         ) {
-            if let Some(panel) = panel_task.await.context("failed to load panel").log_err()
+            if let Some(panel) = panel_task
+                .await
+                .context("failed to load panel")
+                .log_err()
+                .flatten()
             {
                 workspace_handle
                     .update_in(&mut cx, |workspace, window, cx| {
@@ -650,14 +693,34 @@ fn initialize_panels(
         }
 
         futures::join!(
-            add_panel_when_ready(project_panel, workspace_handle.clone(), cx.clone()),
-            add_panel_when_ready(outline_panel, workspace_handle.clone(), cx.clone()),
-            add_panel_when_ready(terminal_panel, workspace_handle.clone(), cx.clone()),
-            add_panel_when_ready(git_panel, workspace_handle.clone(), cx.clone()),
+            add_panel_when_ready(
+                project_panel.map(|result| result.map(Some)),
+                workspace_handle.clone(),
+                cx.clone()
+            ),
+            add_panel_when_ready(
+                outline_panel.map(|result| result.map(Some)),
+                workspace_handle.clone(),
+                cx.clone()
+            ),
+            add_panel_when_ready(
+                terminal_panel.map(|result| result.map(Some)),
+                workspace_handle.clone(),
+                cx.clone()
+            ),
+            add_panel_when_ready(
+                git_panel.map(|result| result.map(Some)),
+                workspace_handle.clone(),
+                cx.clone()
+            ),
             add_panel_when_ready(channels_panel, workspace_handle.clone(), cx.clone()),
             add_panel_when_ready(notification_panel, workspace_handle.clone(), cx.clone()),
-            add_panel_when_ready(debug_panel, workspace_handle.clone(), cx.clone()),
-            initialize_agent_panel(workspace_handle, prompt_builder, cx.clone()).map(|r| r.log_err()),
+            add_panel_when_ready(
+                debug_panel.map(|result| result.map(Some)),
+                workspace_handle.clone(),
+                cx.clone()
+            ),
+            add_panel_when_ready(agent_panel, workspace_handle, cx.clone()),
         );
 
         anyhow::Ok(())
@@ -665,6 +728,7 @@ fn initialize_panels(
     .detach();
 }
 
+#[cfg(feature = "ai")]
 fn setup_or_teardown_ai_panel<P: Panel>(
     workspace: &mut Workspace,
     window: &mut Window,
@@ -701,6 +765,7 @@ fn setup_or_teardown_ai_panel<P: Panel>(
     }
 }
 
+#[cfg(feature = "ai")]
 async fn initialize_agent_panel(
     workspace_handle: WeakEntity<Workspace>,
     prompt_builder: Arc<PromptBuilder>,
@@ -1012,7 +1077,10 @@ fn register_actions(
              cx: &mut Context<Workspace>| {
                 workspace.toggle_panel_focus::<OutlinePanel>(window, cx);
             },
-        )
+        );
+
+    #[cfg(feature = "collab")]
+    workspace
         .register_action(
             |workspace: &mut Workspace,
              _: &collab_ui::collab_panel::ToggleFocus,
@@ -1030,7 +1098,9 @@ fn register_actions(
                     window, cx,
                 );
             },
-        )
+        );
+
+    workspace
         .register_action(
             |workspace: &mut Workspace,
              _: &terminal_panel::ToggleFocus,
@@ -1054,9 +1124,8 @@ fn register_actions(
                             let buffer = project.update(cx, |project, cx| {
                                 project.create_local_buffer("", None, true, cx)
                             });
-                            let editor = cx.new(|cx| {
-                                Editor::for_buffer(buffer, Some(project), window, cx)
-                            });
+                            let editor =
+                                cx.new(|cx| Editor::for_buffer(buffer, Some(project), window, cx));
                             workspace.add_item_to_active_pane(
                                 Box::new(editor),
                                 None,
@@ -1073,7 +1142,8 @@ fn register_actions(
         .register_action({
             let app_state = Arc::downgrade(&app_state);
             move |_, _: &CloseProject, window, cx| {
-                let Some(window_handle) = window.window_handle().downcast::<MultiWorkspace>() else {
+                let Some(window_handle) = window.window_handle().downcast::<MultiWorkspace>()
+                else {
                     return;
                 };
                 if let Some(app_state) = app_state.upgrade() {
@@ -1091,9 +1161,8 @@ fn register_actions(
                             let buffer = project.update(cx, |project, cx| {
                                 project.create_local_buffer("", None, true, cx)
                             });
-                            let editor = cx.new(|cx| {
-                                Editor::for_buffer(buffer, Some(project), window, cx)
-                            });
+                            let editor =
+                                cx.new(|cx| Editor::for_buffer(buffer, Some(project), window, cx));
                             workspace.add_item_to_active_pane(
                                 Box::new(editor),
                                 None,
@@ -1195,7 +1264,9 @@ fn initialize_pane(
             toolbar.add_item(lsp_log_item, window, cx);
             let dap_log_item = cx.new(|_| debugger_tools::DapLogToolbarItemView::new());
             toolbar.add_item(dap_log_item, window, cx);
+            #[cfg(feature = "ai")]
             let acp_tools_item = cx.new(|_| acp_tools::AcpToolsToolbarItemView::new());
+            #[cfg(feature = "ai")]
             toolbar.add_item(acp_tools_item, window, cx);
             let telemetry_log_item =
                 cx.new(|cx| telemetry_log::TelemetryLogToolbarItemView::new(window, cx));
@@ -1214,7 +1285,9 @@ fn initialize_pane(
             toolbar.add_item(branch_diff_toolbar, window, cx);
             let commit_view_toolbar = cx.new(|_| CommitViewToolbar::new());
             toolbar.add_item(commit_view_toolbar, window, cx);
+            #[cfg(feature = "ai")]
             let agent_diff_toolbar = cx.new(AgentDiffToolbar::new);
+            #[cfg(feature = "ai")]
             toolbar.add_item(agent_diff_toolbar, window, cx);
             let basedpyright_banner = cx.new(|cx| BasedPyrightBanner::new(workspace, cx));
             toolbar.add_item(basedpyright_banner, window, cx);
@@ -1823,23 +1896,33 @@ fn reload_keymaps(cx: &mut App, mut user_key_bindings: Vec<KeyBinding>) {
 }
 
 pub fn load_default_keymap(cx: &mut App) {
+    fn bind_keymap_asset(asset_path: &str, source: KeybindSource, cx: &mut App) {
+        let Some(mut key_bindings) =
+            KeymapFile::load_asset_allow_partial_failure(asset_path, cx).log_err()
+        else {
+            return;
+        };
+
+        for key_binding in &mut key_bindings {
+            key_binding.set_meta(source.meta());
+        }
+
+        cx.bind_keys(key_bindings);
+    }
+
     let base_keymap = *BaseKeymap::get_global(cx);
     if base_keymap == BaseKeymap::None {
         return;
     }
 
-    cx.bind_keys(
-        KeymapFile::load_asset(DEFAULT_KEYMAP_PATH, Some(KeybindSource::Default), cx).unwrap(),
-    );
+    bind_keymap_asset(DEFAULT_KEYMAP_PATH, KeybindSource::Default, cx);
 
     if let Some(asset_path) = base_keymap.asset_path() {
-        cx.bind_keys(KeymapFile::load_asset(asset_path, Some(KeybindSource::Base), cx).unwrap());
+        bind_keymap_asset(asset_path, KeybindSource::Base, cx);
     }
 
     if VimModeSetting::get_global(cx).0 || vim_mode_setting::HelixModeSetting::get_global(cx).0 {
-        cx.bind_keys(
-            KeymapFile::load_asset(VIM_KEYMAP_PATH, Some(KeybindSource::Vim), cx).unwrap(),
-        );
+        bind_keymap_asset(VIM_KEYMAP_PATH, KeybindSource::Vim, cx);
     }
 }
 
@@ -2100,6 +2183,7 @@ fn open_settings_file(
     .detach_and_log_err(cx);
 }
 
+#[cfg(feature = "audio")]
 fn capture_recent_audio(workspace: &mut Workspace, _: &mut Window, cx: &mut Context<Workspace>) {
     struct CaptureRecentAudioNotification {
         focus_handle: gpui::FocusHandle,
@@ -2175,6 +2259,19 @@ fn capture_recent_audio(workspace: &mut Workspace, _: &mut Window, cx: &mut Cont
         NotificationId::unique::<CaptureRecentAudioNotification>(),
         cx,
         |cx| cx.new(CaptureRecentAudioNotification::new),
+    );
+}
+
+#[cfg(not(feature = "audio"))]
+fn capture_recent_audio(workspace: &mut Workspace, _: &mut Window, cx: &mut Context<Workspace>) {
+    struct CaptureRecentAudioDisabled;
+
+    workspace.show_toast(
+        Toast::new(
+            NotificationId::unique::<CaptureRecentAudioDisabled>(),
+            "Audio capture is unavailable in this build.",
+        ),
+        cx,
     );
 }
 
@@ -3666,7 +3763,7 @@ mod tests {
                             .language_at(MultiBufferOffset(0), cx)
                             .unwrap()
                             .name(),
-                        "Rust"
+                        "Rust".into()
                     );
                 });
             })
@@ -3814,7 +3911,7 @@ mod tests {
                             .language_at(MultiBufferOffset(0), cx)
                             .unwrap()
                             .name(),
-                        "Rust"
+                        "Rust".into()
                     )
                 });
             })
@@ -4998,6 +5095,7 @@ mod tests {
 
             gpui_tokio::init(cx);
             theme::init(theme::LoadThemes::JustBase, cx);
+            #[cfg(feature = "audio")]
             audio::init(cx);
             channel::init(&app_state.client, app_state.user_store.clone(), cx);
             call::init(app_state.client.clone(), app_state.user_store.clone(), cx);

@@ -149,7 +149,7 @@ impl AgentTool for ListDirectoryTool {
         input: Self::Input,
         event_stream: ToolCallEventStream,
         cx: &mut App,
-    ) -> Task<Result<Self::Output, Self::Output>> {
+    ) -> Task<Result<Self::Output>> {
         // Sometimes models will return these even though we tell it to give a path and not a glob.
         // When this happens, just list the root worktree directories.
         if matches!(input.path.as_str(), "." | "" | "./" | "*") {
@@ -187,7 +187,7 @@ impl AgentTool for ListDirectoryTool {
                             canonical_target,
                         } => (project_path, Some(canonical_target)),
                     })
-                }).map_err(|e| e.to_string())?;
+                })?;
 
             // Check settings exclusions synchronously
             project.read_with(cx, |project, cx| {
@@ -236,7 +236,7 @@ impl AgentTool for ListDirectoryTool {
                 }
 
                 anyhow::Ok(())
-            }).map_err(|e| e.to_string())?;
+            })?;
 
             if let Some(canonical_target) = &symlink_canonical_target {
                 let authorize = cx.update(|cx| {
@@ -248,13 +248,13 @@ impl AgentTool for ListDirectoryTool {
                         cx,
                     )
                 });
-                authorize.await.map_err(|e| e.to_string())?;
+                authorize.await?;
             }
 
             let list_path = input.path;
             cx.update(|cx| {
                 Self::build_directory_output(&project, &project_path, &list_path, cx)
-            }).map_err(|e| e.to_string())
+            })
         })
     }
 }
@@ -422,7 +422,7 @@ mod tests {
         let output = cx
             .update(|cx| tool.clone().run(input, ToolCallEventStream::test().0, cx))
             .await;
-        assert!(output.unwrap_err().contains("Path not found"));
+        assert!(output.unwrap_err().to_string().contains("Path not found"));
 
         // Test trying to list a file instead of directory
         let input = ListDirectoryToolInput {
@@ -431,7 +431,12 @@ mod tests {
         let output = cx
             .update(|cx| tool.run(input, ToolCallEventStream::test().0, cx))
             .await;
-        assert!(output.unwrap_err().contains("is not a directory"));
+        assert!(
+            output
+                .unwrap_err()
+                .to_string()
+                .contains("is not a directory")
+        );
     }
 
     #[gpui::test]
@@ -523,7 +528,10 @@ mod tests {
             .update(|cx| tool.clone().run(input, ToolCallEventStream::test().0, cx))
             .await;
         assert!(
-            output.unwrap_err().contains("file_scan_exclusions"),
+            output
+                .unwrap_err()
+                .to_string()
+                .contains("file_scan_exclusions"),
             "Error should mention file_scan_exclusions"
         );
 
@@ -703,7 +711,12 @@ mod tests {
         let output = cx
             .update(|cx| tool.clone().run(input, ToolCallEventStream::test().0, cx))
             .await;
-        assert!(output.unwrap_err().contains("Cannot list directory"),);
+        assert!(
+            output
+                .unwrap_err()
+                .to_string()
+                .contains("Cannot list directory"),
+        );
     }
 
     #[gpui::test]
@@ -884,7 +897,7 @@ mod tests {
             result.is_err(),
             "Expected list_directory to fail on private path"
         );
-        let error = result.unwrap_err();
+        let error = result.unwrap_err().to_string();
         assert!(
             error.contains("private"),
             "Expected private path validation error, got: {error}"

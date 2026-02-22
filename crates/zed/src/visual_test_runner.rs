@@ -179,6 +179,7 @@ fn run_visual_tests(project_path: PathBuf, update_baseline: bool) -> Result<()> 
         gpui_tokio::init(cx);
         theme::init(theme::LoadThemes::JustBase, cx);
         client::init(&app_state.client, cx);
+        #[cfg(feature = "audio")]
         audio::init(cx);
         workspace::init(app_state.clone(), cx);
         release_channel::init(semver::Version::new(0, 0, 0), cx);
@@ -1288,7 +1289,7 @@ fn run_settings_ui_subpage_visual_tests(
         )
     });
 
-    let workspace_window: WindowHandle<MultiWorkspace> = cx
+    let workspace_window: WindowHandle<Workspace> = cx
         .update(|cx| {
             cx.open_window(
                 WindowOptions {
@@ -1298,10 +1299,9 @@ fn run_settings_ui_subpage_visual_tests(
                     ..Default::default()
                 },
                 |window, cx| {
-                    let workspace = cx.new(|cx| {
+                    cx.new(|cx| {
                         Workspace::new(None, project.clone(), app_state.clone(), window, cx)
-                    });
-                    cx.new(|cx| MultiWorkspace::new(workspace, window, cx))
+                    })
                 },
             )
         })
@@ -2053,12 +2053,7 @@ fn run_agent_thread_view_test(
     cx.background_executor.allow_parking();
     let run_result = cx.foreground_executor.block_test(run_task);
     cx.background_executor.forbid_parking();
-    run_result.map_err(|e| match e {
-        language_model::LanguageModelToolResultContent::Text(text) => {
-            anyhow::anyhow!("ReadFileTool failed: {text}")
-        }
-        other => anyhow::anyhow!("ReadFileTool failed: {other:?}"),
-    })?;
+    run_result.context("ReadFileTool failed")?;
 
     cx.run_until_parked();
 
@@ -2344,7 +2339,7 @@ fn run_tool_permissions_visual_tests(
         )
     });
 
-    let workspace_window: WindowHandle<MultiWorkspace> = cx
+    let workspace_window: WindowHandle<Workspace> = cx
         .update(|cx| {
             cx.open_window(
                 WindowOptions {
@@ -2354,10 +2349,9 @@ fn run_tool_permissions_visual_tests(
                     ..Default::default()
                 },
                 |window, cx| {
-                    let workspace = cx.new(|cx| {
+                    cx.new(|cx| {
                         Workspace::new(None, project.clone(), app_state.clone(), window, cx)
-                    });
-                    cx.new(|cx| MultiWorkspace::new(workspace, window, cx))
+                    })
                 },
             )
         })

@@ -1,10 +1,12 @@
 use crate::{
-    AppState, CollaboratorId, FollowerState, Pane, Workspace, WorkspaceSettings,
+    AppState, CollaboratorId, FollowerState, Pane, Workspace, WorkspaceActiveCall,
+    WorkspaceSettings,
     pane_group::element::pane_axis,
     workspace_settings::{PaneSplitDirectionHorizontal, PaneSplitDirectionVertical},
 };
 use anyhow::Result;
-use call::{ActiveCall, ParticipantLocation};
+#[cfg(feature = "collab")]
+use call::ParticipantLocation;
 use collections::HashMap;
 use gpui::{
     Along, AnyView, AnyWeakView, Axis, Bounds, Entity, Hsla, IntoElement, MouseButton, Pixels,
@@ -296,7 +298,7 @@ impl Member {
 pub struct PaneRenderContext<'a> {
     pub project: &'a Entity<Project>,
     pub follower_states: &'a HashMap<CollaboratorId, FollowerState>,
-    pub active_call: Option<&'a Entity<ActiveCall>>,
+    pub active_call: Option<&'a Entity<WorkspaceActiveCall>>,
     pub active_pane: &'a Entity<Pane>,
     pub app_state: &'a Arc<AppState>,
     pub workspace: &'a WeakEntity<Workspace>,
@@ -358,82 +360,91 @@ impl PaneLeaderDecorator for PaneRenderContext<'_> {
         let status_box;
         match leader_id {
             CollaboratorId::PeerId(peer_id) => {
-                let Some(leader) = self.active_call.as_ref().and_then(|call| {
-                    let room = call.read(cx).room()?.read(cx);
-                    room.remote_participant_for_peer_id(peer_id)
-                }) else {
-                    return LeaderDecoration::default();
-                };
+                #[cfg(feature = "collab")]
+                {
+                    let Some(leader) = self.active_call.as_ref().and_then(|call| {
+                        let room = call.read(cx).room()?.read(cx);
+                        room.remote_participant_for_peer_id(peer_id)
+                    }) else {
+                        return LeaderDecoration::default();
+                    };
 
-                let is_in_unshared_view = follower_state.active_view_id.is_some_and(|view_id| {
-                    !follower_state
-                        .items_by_leader_view_id
-                        .contains_key(&view_id)
-                });
+                    let is_in_unshared_view =
+                        follower_state.active_view_id.is_some_and(|view_id| {
+                            !follower_state
+                                .items_by_leader_view_id
+                                .contains_key(&view_id)
+                        });
 
-                let mut leader_join_data = None;
-                let leader_status_box = match leader.location {
-                    ParticipantLocation::SharedProject {
-                        project_id: leader_project_id,
-                    } => {
-                        if Some(leader_project_id) == self.project.read(cx).remote_id() {
-                            is_in_unshared_view.then(|| {
-                                Label::new(format!(
-                                    "{} is in an unshared pane",
-                                    leader.user.github_login
-                                ))
-                            })
-                        } else {
-                            leader_join_data = Some((leader_project_id, leader.user.id));
-                            Some(Label::new(format!(
-                                "Follow {} to their active project",
-                                leader.user.github_login,
-                            )))
+                    let mut leader_join_data = None;
+                    let leader_status_box = match leader.location {
+                        ParticipantLocation::SharedProject {
+                            project_id: leader_project_id,
+                        } => {
+                            if Some(leader_project_id) == self.project.read(cx).remote_id() {
+                                is_in_unshared_view.then(|| {
+                                    Label::new(format!(
+                                        "{} is in an unshared pane",
+                                        leader.user.github_login
+                                    ))
+                                })
+                            } else {
+                                leader_join_data = Some((leader_project_id, leader.user.id));
+                                Some(Label::new(format!(
+                                    "Follow {} to their active project",
+                                    leader.user.github_login,
+                                )))
+                            }
                         }
-                    }
-                    ParticipantLocation::UnsharedProject => Some(Label::new(format!(
-                        "{} is viewing an unshared Zed project",
-                        leader.user.github_login
-                    ))),
-                    ParticipantLocation::External => Some(Label::new(format!(
-                        "{} is viewing a window outside of Zed",
-                        leader.user.github_login
-                    ))),
-                };
-                status_box = leader_status_box.map(|status| {
-                    div()
-                        .absolute()
-                        .w_96()
-                        .bottom_3()
-                        .right_3()
-                        .elevation_2(cx)
-                        .p_1()
-                        .child(status)
-                        .when_some(
-                            leader_join_data,
-                            |this, (leader_project_id, leader_user_id)| {
-                                let app_state = self.app_state.clone();
-                                this.cursor_pointer().on_mouse_down(
-                                    MouseButton::Left,
-                                    move |_, _, cx| {
-                                        crate::join_in_room_project(
-                                            leader_project_id,
-                                            leader_user_id,
-                                            app_state.clone(),
-                                            cx,
-                                        )
-                                        .detach_and_log_err(cx);
-                                    },
-                                )
-                            },
-                        )
-                        .into_any_element()
-                });
-                leader_color = cx
-                    .theme()
-                    .players()
-                    .color_for_participant(leader.participant_index.0)
-                    .cursor;
+                        ParticipantLocation::UnsharedProject => Some(Label::new(format!(
+                            "{} is viewing an unshared Zed project",
+                            leader.user.github_login
+                        ))),
+                        ParticipantLocation::External => Some(Label::new(format!(
+                            "{} is viewing a window outside of Zed",
+                            leader.user.github_login
+                        ))),
+                    };
+                    status_box = leader_status_box.map(|status| {
+                        div()
+                            .absolute()
+                            .w_96()
+                            .bottom_3()
+                            .right_3()
+                            .elevation_2(cx)
+                            .p_1()
+                            .child(status)
+                            .when_some(
+                                leader_join_data,
+                                |this, (leader_project_id, leader_user_id)| {
+                                    let app_state = self.app_state.clone();
+                                    this.cursor_pointer().on_mouse_down(
+                                        MouseButton::Left,
+                                        move |_, _, cx| {
+                                            crate::join_in_room_project(
+                                                leader_project_id,
+                                                leader_user_id,
+                                                app_state.clone(),
+                                                cx,
+                                            )
+                                            .detach_and_log_err(cx);
+                                        },
+                                    )
+                                },
+                            )
+                            .into_any_element()
+                    });
+                    leader_color = cx
+                        .theme()
+                        .players()
+                        .color_for_participant(leader.participant_index.0)
+                        .cursor;
+                }
+                #[cfg(not(feature = "collab"))]
+                {
+                    let _ = peer_id;
+                    return LeaderDecoration::default();
+                }
             }
             CollaboratorId::Agent => {
                 status_box = None;

@@ -23,7 +23,6 @@ use postage::{oneshot, prelude::*};
 use regex::Regex;
 pub use rope::*;
 pub use selection::*;
-use smallvec::SmallVec;
 use std::{
     borrow::Cow,
     cmp::{self, Ordering, Reverse},
@@ -542,7 +541,7 @@ pub struct Fragment {
     pub insertion_offset: usize,
     pub len: usize,
     pub visible: bool,
-    pub deletions: SmallVec<[clock::Lamport; 2]>,
+    pub deletions: HashSet<clock::Lamport>,
     pub max_undos: clock::Global,
 }
 
@@ -949,7 +948,7 @@ impl Buffer {
                     intersection.insertion_offset += fragment_start - old_fragments.start().visible;
                     intersection.id =
                         Locator::between(&new_fragments.summary().max_id, &intersection.id);
-                    intersection.deletions.push(timestamp);
+                    intersection.deletions.insert(timestamp);
                     intersection.visible = false;
                 }
                 if intersection.len > 0 {
@@ -1198,7 +1197,7 @@ impl Buffer {
                         fragment_start - old_fragments.start().0.full_offset();
                     intersection.id =
                         Locator::between(&new_fragments.summary().max_id, &intersection.id);
-                    intersection.deletions.push(timestamp);
+                    intersection.deletions.insert(timestamp);
                     intersection.visible = false;
                     insertion_slices.push(InsertionSlice::from_fragment(timestamp, &intersection));
                 }

@@ -11,6 +11,7 @@ mod path_list;
 mod persistence;
 pub mod searchable;
 mod security_modal;
+#[cfg(feature = "collab")]
 pub mod shared_screen;
 mod status_bar;
 pub mod tasks;
@@ -31,6 +32,7 @@ pub use path_list::PathList;
 pub use toast_layer::{ToastAction, ToastLayer, ToastView};
 
 use anyhow::{Context as _, Result, anyhow};
+#[cfg(feature = "collab")]
 use call::{ActiveCall, call_settings::CallSettings};
 use client::{
     ChannelId, Client, ErrorExt, Status, TypedEnvelope, UserStore,
@@ -97,6 +99,7 @@ use session::AppSession;
 use settings::{
     CenteredPaddingSettings, Settings, SettingsLocation, SettingsStore, update_settings_file,
 };
+#[cfg(feature = "collab")]
 use shared_screen::SharedScreen;
 use sqlez::{
     bindable::{Bind, Column, StaticColumnCount},
@@ -139,6 +142,11 @@ pub use workspace_settings::{
     AutosaveSetting, BottomDockLayout, RestoreOnStartupBehavior, StatusBarSettings, TabBarSettings,
     WorkspaceSettings,
 };
+
+#[cfg(feature = "collab")]
+pub type WorkspaceActiveCall = call::ActiveCall;
+#[cfg(not(feature = "collab"))]
+pub enum WorkspaceActiveCall {}
 use zed_actions::{Spawn, feedback::FileBugReport};
 
 use crate::{item::ItemBufferKind, notifications::NotificationId};
@@ -1258,7 +1266,7 @@ pub struct Workspace {
     window_edited: bool,
     last_window_title: Option<String>,
     dirty_items: HashMap<EntityId, Subscription>,
-    active_call: Option<(Entity<ActiveCall>, Vec<Subscription>)>,
+    active_call: Option<(Entity<WorkspaceActiveCall>, Vec<Subscription>)>,
     leader_updates_tx: mpsc::UnboundedSender<(PeerId, proto::UpdateFollowers)>,
     database_id: Option<WorkspaceId>,
     app_state: Arc<AppState>,
@@ -1571,11 +1579,21 @@ impl Workspace {
 
         let session_id = app_state.session.read(cx).id().to_owned();
 
-        let mut active_call = None;
-        if let Some(call) = ActiveCall::try_global(cx) {
-            let subscriptions = vec![cx.subscribe_in(&call, window, Self::on_active_call_event)];
-            active_call = Some((call, subscriptions));
-        }
+        let active_call = {
+            #[cfg(feature = "collab")]
+            {
+                let mut active_call = None;
+                if let Some(call) = ActiveCall::try_global(cx) {
+                    let subscriptions = vec![cx.subscribe_in(&call, window, Self::on_active_call_event)];
+                    active_call = Some((call, subscriptions));
+                }
+                active_call
+            }
+            #[cfg(not(feature = "collab"))]
+            {
+                None
+            }
+        };
 
         let (serializable_items_tx, serializable_items_rx) =
             mpsc::unbounded::<Box<dyn SerializableItemHandle>>();
@@ -2732,6 +2750,7 @@ impl Workspace {
                 close_intent != CloseIntent::ReplaceWindow && remaining_workspaces == 0
             };
 
+            #[cfg(feature = "collab")]
             if let Some(active_call) = active_call
                 && workspace_count == 1
                 && active_call.read_with(cx, |call, _| call.room().is_some())
@@ -4202,12 +4221,19 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(shared_screen) =
-            self.shared_screen_for_peer(peer_id, &self.active_pane, window, cx)
+        #[cfg(feature = "collab")]
         {
-            self.active_pane.update(cx, |pane, cx| {
-                pane.add_item(Box::new(shared_screen), false, true, None, window, cx)
-            });
+            if let Some(shared_screen) =
+                self.shared_screen_for_peer(peer_id, &self.active_pane, window, cx)
+            {
+                self.active_pane.update(cx, |pane, cx| {
+                    pane.add_item(Box::new(shared_screen), false, true, None, window, cx)
+                });
+            }
+        }
+        #[cfg(not(feature = "collab"))]
+        {
+            let _ = (peer_id, window, cx);
         }
     }
 
@@ -4944,35 +4970,44 @@ impl Workspace {
 
         match leader_id {
             CollaboratorId::PeerId(leader_peer_id) => {
-                let room_id = self.active_call()?.read(cx).room()?.read(cx).id();
-                let project_id = self.project.read(cx).remote_id();
-                let request = self.app_state.client.request(proto::Follow {
-                    room_id,
-                    project_id,
-                    leader_id: Some(leader_peer_id),
-                });
+                #[cfg(feature = "collab")]
+                {
+                    let room_id = self.active_call()?.read(cx).room()?.read(cx).id();
+                    let project_id = self.project.read(cx).remote_id();
+                    let request = self.app_state.client.request(proto::Follow {
+                        room_id,
+                        project_id,
+                        leader_id: Some(leader_peer_id),
+                    });
 
-                Some(cx.spawn_in(window, async move |this, cx| {
-                    let response = request.await?;
-                    this.update(cx, |this, _| {
-                        let state = this
-                            .follower_states
-                            .get_mut(&leader_id)
-                            .context("following interrupted")?;
-                        state.active_view_id = response
-                            .active_view
-                            .as_ref()
-                            .and_then(|view| ViewId::from_proto(view.id.clone()?).ok());
-                        anyhow::Ok(())
-                    })??;
-                    if let Some(view) = response.active_view {
-                        Self::add_view_from_leader(this.clone(), leader_peer_id, &view, cx).await?;
-                    }
-                    this.update_in(cx, |this, window, cx| {
-                        this.leader_updated(leader_id, window, cx)
-                    })?;
-                    Ok(())
-                }))
+                    Some(cx.spawn_in(window, async move |this, cx| {
+                        let response = request.await?;
+                        this.update(cx, |this, _| {
+                            let state = this
+                                .follower_states
+                                .get_mut(&leader_id)
+                                .context("following interrupted")?;
+                            state.active_view_id = response
+                                .active_view
+                                .as_ref()
+                                .and_then(|view| ViewId::from_proto(view.id.clone()?).ok());
+                            anyhow::Ok(())
+                        })??;
+                        if let Some(view) = response.active_view {
+                            Self::add_view_from_leader(this.clone(), leader_peer_id, &view, cx)
+                                .await?;
+                        }
+                        this.update_in(cx, |this, window, cx| {
+                            this.leader_updated(leader_id, window, cx)
+                        })?;
+                        Ok(())
+                    }))
+                }
+                #[cfg(not(feature = "collab"))]
+                {
+                    let _ = leader_peer_id;
+                    None
+                }
             }
             CollaboratorId::Agent => {
                 self.leader_updated(leader_id, window, cx)?;
@@ -5038,33 +5073,40 @@ impl Workspace {
         let leader_id = leader_id.into();
 
         if let CollaboratorId::PeerId(peer_id) = leader_id {
-            let Some(room) = ActiveCall::global(cx).read(cx).room() else {
-                return;
-            };
-            let room = room.read(cx);
-            let Some(remote_participant) = room.remote_participant_for_peer_id(peer_id) else {
-                return;
-            };
+            #[cfg(feature = "collab")]
+            {
+                let Some(room) = ActiveCall::global(cx).read(cx).room() else {
+                    return;
+                };
+                let room = room.read(cx);
+                let Some(remote_participant) = room.remote_participant_for_peer_id(peer_id) else {
+                    return;
+                };
 
-            let project = self.project.read(cx);
+                let project = self.project.read(cx);
 
-            let other_project_id = match remote_participant.location {
-                call::ParticipantLocation::External => None,
-                call::ParticipantLocation::UnsharedProject => None,
-                call::ParticipantLocation::SharedProject { project_id } => {
-                    if Some(project_id) == project.remote_id() {
-                        None
-                    } else {
-                        Some(project_id)
+                let other_project_id = match remote_participant.location {
+                    call::ParticipantLocation::External => None,
+                    call::ParticipantLocation::UnsharedProject => None,
+                    call::ParticipantLocation::SharedProject { project_id } => {
+                        if Some(project_id) == project.remote_id() {
+                            None
+                        } else {
+                            Some(project_id)
+                        }
                     }
-                }
-            };
+                };
 
-            // if they are active in another project, follow there.
-            if let Some(project_id) = other_project_id {
-                let app_state = self.app_state.clone();
-                crate::join_in_room_project(project_id, remote_participant.user.id, app_state, cx)
-                    .detach_and_log_err(cx);
+                // if they are active in another project, follow there.
+                if let Some(project_id) = other_project_id {
+                    let app_state = self.app_state.clone();
+                    crate::join_in_room_project(project_id, remote_participant.user.id, app_state, cx)
+                        .detach_and_log_err(cx);
+                }
+            }
+            #[cfg(not(feature = "collab"))]
+            {
+                let _ = peer_id;
             }
         }
 
@@ -5096,16 +5138,23 @@ impl Workspace {
         }
 
         if let CollaboratorId::PeerId(leader_peer_id) = leader_id {
-            let project_id = self.project.read(cx).remote_id();
-            let room_id = self.active_call()?.read(cx).room()?.read(cx).id();
-            self.app_state
-                .client
-                .send(proto::Unfollow {
-                    room_id,
-                    project_id,
-                    leader_id: Some(leader_peer_id),
-                })
-                .log_err();
+            #[cfg(feature = "collab")]
+            {
+                let project_id = self.project.read(cx).remote_id();
+                let room_id = self.active_call()?.read(cx).room()?.read(cx).id();
+                self.app_state
+                    .client
+                    .send(proto::Unfollow {
+                        room_id,
+                        project_id,
+                        leader_id: Some(leader_peer_id),
+                    })
+                    .log_err();
+            }
+            #[cfg(not(feature = "collab"))]
+            {
+                let _ = leader_peer_id;
+            }
         }
 
         Some(())
@@ -5733,6 +5782,7 @@ impl Workspace {
         )
     }
 
+    #[cfg(feature = "collab")]
     fn active_item_for_peer(
         &self,
         peer_id: PeerId,
@@ -5774,6 +5824,17 @@ impl Workspace {
         item_to_activate
     }
 
+    #[cfg(not(feature = "collab"))]
+    fn active_item_for_peer(
+        &self,
+        _peer_id: PeerId,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<(Option<PanelId>, Box<dyn ItemHandle>)> {
+        None
+    }
+
+    #[cfg(feature = "collab")]
     fn shared_screen_for_peer(
         &self,
         peer_id: PeerId,
@@ -5794,6 +5855,17 @@ impl Workspace {
         }
 
         Some(cx.new(|cx| SharedScreen::new(track, peer_id, user.clone(), room.clone(), window, cx)))
+    }
+
+    #[cfg(not(feature = "collab"))]
+    fn shared_screen_for_peer(
+        &self,
+        _peer_id: PeerId,
+        _pane: &Entity<Pane>,
+        _window: &mut Window,
+        _cx: &mut App,
+    ) -> Option<()> {
+        None
     }
 
     pub fn on_window_activation_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -5824,10 +5896,11 @@ impl Workspace {
         }
     }
 
-    pub fn active_call(&self) -> Option<&Entity<ActiveCall>> {
+    pub fn active_call(&self) -> Option<&Entity<WorkspaceActiveCall>> {
         self.active_call.as_ref().map(|(call, _)| call)
     }
 
+    #[cfg(feature = "collab")]
     fn on_active_call_event(
         &mut self,
         _: &Entity<ActiveCall>,
@@ -5842,6 +5915,16 @@ impl Workspace {
             }
             _ => {}
         }
+    }
+
+    #[cfg(not(feature = "collab"))]
+    fn on_active_call_event(
+        &mut self,
+        _: &Entity<WorkspaceActiveCall>,
+        _: &(),
+        _: &mut Window,
+        _: &mut Context<Self>,
+    ) {
     }
 
     pub fn database_id(&self) -> Option<WorkspaceId> {
@@ -7043,13 +7126,21 @@ fn leader_border_for_pane(
 
     let mut leader_color = match leader_id {
         CollaboratorId::PeerId(leader_peer_id) => {
-            let room = ActiveCall::try_global(cx)?.read(cx).room()?.read(cx);
-            let leader = room.remote_participant_for_peer_id(leader_peer_id)?;
+            #[cfg(feature = "collab")]
+            {
+                let room = ActiveCall::try_global(cx)?.read(cx).room()?.read(cx);
+                let leader = room.remote_participant_for_peer_id(leader_peer_id)?;
 
-            cx.theme()
-                .players()
-                .color_for_participant(leader.participant_index.0)
-                .cursor
+                cx.theme()
+                    .players()
+                    .color_for_participant(leader.participant_index.0)
+                    .cursor
+            }
+            #[cfg(not(feature = "collab"))]
+            {
+                let _ = leader_peer_id;
+                return None;
+            }
         }
         CollaboratorId::Agent => cx.theme().players().agent().cursor,
     };
@@ -7786,15 +7877,23 @@ impl WorkspaceStore {
         update: proto::update_followers::Variant,
         cx: &App,
     ) -> Option<()> {
-        let active_call = ActiveCall::try_global(cx)?;
-        let room_id = active_call.read(cx).room()?.read(cx).id();
-        self.client
-            .send(proto::UpdateFollowers {
-                room_id,
-                project_id,
-                variant: Some(update),
-            })
-            .log_err()
+        #[cfg(feature = "collab")]
+        {
+            let active_call = ActiveCall::try_global(cx)?;
+            let room_id = active_call.read(cx).room()?.read(cx).id();
+            self.client
+                .send(proto::UpdateFollowers {
+                    room_id,
+                    project_id,
+                    variant: Some(update),
+                })
+                .log_err()
+        }
+        #[cfg(not(feature = "collab"))]
+        {
+            let _ = (project_id, update, cx);
+            None
+        }
     }
 
     pub async fn handle_follow(
@@ -8059,6 +8158,7 @@ pub async fn restore_multiworkspace(
     })
 }
 
+#[cfg(feature = "collab")]
 actions!(
     collab,
     [
@@ -8095,6 +8195,7 @@ actions!(
     ]
 );
 
+#[cfg(feature = "collab")]
 async fn join_channel_internal(
     channel_id: ChannelId,
     app_state: &Arc<AppState>,
@@ -8244,6 +8345,7 @@ async fn join_channel_internal(
     anyhow::Ok(false)
 }
 
+#[cfg(feature = "collab")]
 pub fn join_channel(
     channel_id: ChannelId,
     app_state: Arc<AppState>,
@@ -8343,6 +8445,17 @@ pub fn join_channel(
         // return ok, we showed the error to the user.
         anyhow::Ok(())
     })
+}
+
+#[cfg(not(feature = "collab"))]
+pub fn join_channel(
+    _channel_id: ChannelId,
+    _app_state: Arc<AppState>,
+    _requesting_window: Option<WindowHandle<MultiWorkspace>>,
+    _requesting_workspace: Option<WeakEntity<Workspace>>,
+    _: &mut App,
+) -> Task<Result<()>> {
+    Task::ready(Err(anyhow!("Collaboration is disabled in this build.")))
 }
 
 pub async fn get_any_active_multi_workspace(
@@ -9062,6 +9175,7 @@ fn deserialize_remote_project(
     })
 }
 
+#[cfg(feature = "collab")]
 pub fn join_in_room_project(
     project_id: u64,
     follow_user_id: u64,
@@ -9164,6 +9278,16 @@ pub fn join_in_room_project(
 
         anyhow::Ok(())
     })
+}
+
+#[cfg(not(feature = "collab"))]
+pub fn join_in_room_project(
+    _project_id: u64,
+    _follow_user_id: u64,
+    _app_state: Arc<AppState>,
+    _: &mut App,
+) -> Task<Result<()>> {
+    Task::ready(Err(anyhow!("Collaboration is disabled in this build.")))
 }
 
 pub fn reload(cx: &mut App) {

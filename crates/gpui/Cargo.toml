@@ -31,9 +31,7 @@ leak-detection = ["backtrace"]
 wayland = [
     "bitflags",
 ]
-x11 = [
-    "scap?/x11",
-]
+x11 = []
 screen-capture = [
     "scap",
 ]

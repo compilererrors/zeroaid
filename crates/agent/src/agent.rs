@@ -987,7 +987,7 @@ impl NativeAgentConnection {
         }) else {
             return Task::ready(Err(anyhow!("Session not found")));
         };
-        log::debug!("Found session for: {}", session_id);
+        log::debug!("Found session");
 
         let response_stream = match f(thread, cx) {
             Ok(stream) => stream,
@@ -1006,7 +1006,18 @@ impl NativeAgentConnection {
             while let Some(result) = events.next().await {
                 match result {
                     Ok(event) => {
-                        log::trace!("Received completion event: {:?}", event);
+                        let event_kind = match &event {
+                            ThreadEvent::UserMessage(_) => "user_message",
+                            ThreadEvent::AgentText(_) => "agent_text",
+                            ThreadEvent::AgentThinking(_) => "agent_thinking",
+                            ThreadEvent::ToolCallAuthorization(_) => "tool_call_authorization",
+                            ThreadEvent::ToolCall(_) => "tool_call",
+                            ThreadEvent::ToolCallUpdate(_) => "tool_call_update",
+                            ThreadEvent::SubagentSpawned(_) => "subagent_spawned",
+                            ThreadEvent::Retry(_) => "retry",
+                            ThreadEvent::Stop(_) => "stop",
+                        };
+                        log::trace!("Received completion event kind: {}", event_kind);
 
                         match event {
                             ThreadEvent::UserMessage(message) => {
@@ -1293,7 +1304,7 @@ impl acp_thread::AgentConnection for NativeAgentConnection {
     ) -> Task<Result<acp::PromptResponse>> {
         let id = id.expect("UserMessageId is required");
         let session_id = params.session_id.clone();
-        log::info!("Received prompt request for session: {}", session_id);
+        log::info!("Received prompt request");
         log::debug!("Prompt blocks count: {}", params.prompt.len());
 
         if let Some(parsed_command) = Command::parse(&params.prompt) {
@@ -1346,8 +1357,6 @@ impl acp_thread::AgentConnection for NativeAgentConnection {
                 .collect::<Vec<_>>();
             log::debug!("Converted prompt to message: {} chars", content.len());
             log::debug!("Message id: {:?}", id);
-            log::debug!("Message content: {:?}", content);
-
             thread.update(cx, |thread, cx| thread.send(id, content, cx))
         })
     }
@@ -1364,7 +1373,7 @@ impl acp_thread::AgentConnection for NativeAgentConnection {
     }
 
     fn cancel(&self, session_id: &acp::SessionId, cx: &mut App) {
-        log::info!("Cancelling on session: {}", session_id);
+        log::info!("Cancelling session");
         self.0.update(cx, |agent, cx| {
             if let Some(session) = agent.sessions.get(session_id) {
                 session
@@ -1611,60 +1620,11 @@ impl NativeThreadEnvironment {
             agent.register_session(subagent_thread.clone(), cx)
         })?;
 
-        Self::prompt_subagent(
-            session_id,
-            subagent_thread,
-            acp_thread,
-            parent_thread_entity,
-            initial_prompt,
-            timeout,
-            cx,
-        )
-    }
-
-    pub(crate) fn resume_subagent_thread(
-        agent: WeakEntity<NativeAgent>,
-        parent_thread_entity: Entity<Thread>,
-        session_id: acp::SessionId,
-        follow_up_prompt: String,
-        timeout: Option<Duration>,
-        cx: &mut App,
-    ) -> Result<Rc<dyn SubagentHandle>> {
-        let (subagent_thread, acp_thread) = agent.update(cx, |agent, _cx| {
-            let session = agent
-                .sessions
-                .get(&session_id)
-                .ok_or_else(|| anyhow!("No subagent session found with id {session_id}"))?;
-            anyhow::Ok((session.thread.clone(), session.acp_thread.clone()))
-        })??;
-
-        Self::prompt_subagent(
-            session_id,
-            subagent_thread,
-            acp_thread,
-            parent_thread_entity,
-            follow_up_prompt,
-            timeout,
-            cx,
-        )
-    }
-
-    fn prompt_subagent(
-        session_id: acp::SessionId,
-        subagent_thread: Entity<Thread>,
-        acp_thread: Entity<acp_thread::AcpThread>,
-        parent_thread_entity: Entity<Thread>,
-        prompt: String,
-        timeout: Option<Duration>,
-        cx: &mut App,
-    ) -> Result<Rc<dyn SubagentHandle>> {
         parent_thread_entity.update(cx, |parent_thread, _cx| {
             parent_thread.register_running_subagent(subagent_thread.downgrade())
         });
 
-        let task = acp_thread.update(cx, |acp_thread, cx| {
-            acp_thread.send(vec![prompt.into()], cx)
-        });
+        let task = acp_thread.update(cx, |agent, cx| agent.send(vec![initial_prompt.into()], cx));
 
         let timeout_timer = timeout.map(|d| cx.background_executor().timer(d));
         let wait_for_prompt_to_complete = cx
@@ -1757,24 +1717,6 @@ impl ThreadEnvironment for NativeThreadEnvironment {
             cx,
         )
     }
-
-    fn resume_subagent(
-        &self,
-        parent_thread_entity: Entity<Thread>,
-        session_id: acp::SessionId,
-        follow_up_prompt: String,
-        timeout: Option<Duration>,
-        cx: &mut App,
-    ) -> Result<Rc<dyn SubagentHandle>> {
-        Self::resume_subagent_thread(
-            self.agent.clone(),
-            parent_thread_entity,
-            session_id,
-            follow_up_prompt,
-            timeout,
-            cx,
-        )
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1804,19 +1746,20 @@ impl SubagentHandle for NativeSubagentHandle {
         let parent_thread = self.parent_thread.clone();
 
         cx.spawn(async move |cx| {
-            let result = match wait_for_prompt.await {
-                SubagentInitialPromptResult::Completed => thread.read_with(cx, |thread, _cx| {
-                    thread
-                        .last_message()
-                        .map(|m| m.to_markdown())
-                        .context("No response from subagent")
-                }),
+            match wait_for_prompt.await {
+                SubagentInitialPromptResult::Completed => {}
                 SubagentInitialPromptResult::Timeout => {
-                    thread.update(cx, |thread, cx| thread.cancel(cx)).await;
-                    Err(anyhow!("The time to complete the task was exceeded."))
+                    return Err(anyhow!("The time to complete the task was exceeded."));
                 }
-                SubagentInitialPromptResult::Cancelled => Err(anyhow!("User cancelled")),
+                SubagentInitialPromptResult::Cancelled => return Err(anyhow!("User cancelled")),
             };
+
+            let result = thread.read_with(cx, |thread, _cx| {
+                thread
+                    .last_message()
+                    .map(|m| m.to_markdown())
+                    .context("No response from subagent")
+            });
 
             parent_thread
                 .update(cx, |parent_thread, cx| {

@@ -35,7 +35,7 @@ use std::{
     iter, mem,
     ops::Range,
     path::Path,
-    sync::Arc,
+    sync::{Arc, LazyLock},
     time::{Duration, Instant},
 };
 
@@ -43,6 +43,16 @@ use text::{BufferSnapshot, ToPoint};
 use ui::IconName;
 use util::{ResultExt, TryFutureExt, post_inc};
 use uuid::Uuid;
+
+static ZED_ENABLE_AUTOMATIC_MODEL_PROVIDER_REQUESTS: LazyLock<bool> = LazyLock::new(|| {
+    std::env::var("ZED_ENABLE_AUTOMATIC_MODEL_PROVIDER_REQUESTS").is_ok_and(|value| {
+        !value.is_empty() && value != "0" && !value.eq_ignore_ascii_case("false")
+    })
+});
+
+fn automatic_model_provider_requests_enabled() -> bool {
+    *ZED_ENABLE_AUTOMATIC_MODEL_PROVIDER_REQUESTS
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct TextThreadId(String);
@@ -1253,7 +1263,9 @@ impl TextThread {
                     .await?;
                 this.update(cx, |this, cx| {
                     this.token_count = Some(token_count);
-                    this.start_cache_warming(&model.model, cx);
+                    if automatic_model_provider_requests_enabled() {
+                        this.start_cache_warming(&model.model, cx);
+                    }
                     cx.notify()
                 })
             }
@@ -2140,7 +2152,9 @@ impl TextThread {
                     this.update(cx, |this, cx| {
                         this.pending_completions
                             .retain(|completion| completion.id != pending_completion_id);
-                        this.summarize(false, cx);
+                        if automatic_model_provider_requests_enabled() {
+                            this.summarize(false, cx);
+                        }
                         this.update_cache_status_for_completion(cx);
                     })?;
 

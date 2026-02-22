@@ -14,7 +14,7 @@ use zeta_prompt::ZetaPromptInput;
 
 use crate::example::Example;
 use crate::progress::{InfoStyle, Progress, Step};
-const EDIT_PREDICTION_DEPLOYMENT_EVENT: &str = "Edit Prediction Deployment";
+use crate::sync_deployments::EDIT_PREDICTION_DEPLOYMENT_EVENT;
 use edit_prediction::example_spec::{
     CapturedEvent, CapturedPromptInput, CapturedRelatedExcerpt, CapturedRelatedFile, ExampleSpec,
     TelemetrySource,

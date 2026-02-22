@@ -56,10 +56,62 @@
   "formatter": "auto",
   "remove_trailing_whitespace_on_save": true,
   "ensure_final_newline_on_save": true,
+  "disable_ai": true,
+  "agent": {
+    "enabled": false,
+    "button": false,
+  },
+  "collaboration_panel": {
+    "button": false,
+  },
+  "title_bar": {
+    "show_sign_in": false,
+  },
+  "show_call_status_icon": false,
+  "telemetry": {
+    "diagnostics": false,
+    "metrics": false,
+  },
+  "linked_edits": false,
+  "diagnostics_max_severity": "error",
+  "lsp_document_colors": "none",
+  "toolbar": {
+    "breadcrumbs": false,
+  },
+  "completions": {
+    "lsp_fetch_timeout_ms": 250,
+  },
+  "diagnostics": {
+    "include_warnings": false,
+    "lsp_pull_diagnostics": {
+      "enabled": false,
+      "debounce_ms": 500,
+    },
+  },
+  "git": {
+    "enable_diff": false,
+    "git_gutter": "hide",
+    "gutter_debounce": 300,
+    "inline_blame": {
+      "enabled": false,
+    },
+  },
+  "project_panel": {
+    "show_diagnostics": "off",
+  },
   "file_scan_exclusions": [
     "crates/agent/src/edit_agent/evals/fixtures",
     "crates/eval/worktrees/",
     "crates/eval/repos/",
+    "**/target/**",
+    "**/node_modules/**",
+    "**/.next/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/.cache/**",
+    "**/.venv/**",
+    "**/__pycache__/**",
+    "**/.pytest_cache/**",
     "**/.git",
     "**/.svn",
     "**/.hg",

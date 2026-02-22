@@ -5,7 +5,7 @@ use crate::{
 };
 use agent_client_protocol as acp;
 use agent_settings::AgentSettings;
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use cloud_llm_client::WebSearchResponse;
 use futures::FutureExt as _;
 use gpui::{App, AppContext, Task};
@@ -29,20 +29,14 @@ pub struct WebSearchToolInput {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum WebSearchToolOutput {
-    Success(WebSearchResponse),
-    Error { error: String },
-}
+#[serde(transparent)]
+pub struct WebSearchToolOutput(WebSearchResponse);
 
 impl From<WebSearchToolOutput> for LanguageModelToolResultContent {
     fn from(value: WebSearchToolOutput) -> Self {
-        match value {
-            WebSearchToolOutput::Success(response) => serde_json::to_string(&response)
-                .unwrap_or_else(|e| format!("Failed to serialize web search response: {e}"))
-                .into(),
-            WebSearchToolOutput::Error { error } => error.into(),
-        }
+        serde_json::to_string(&value.0)
+            .expect("Failed to serialize WebSearchResponse")
+            .into()
     }
 }
 
@@ -76,7 +70,7 @@ impl AgentTool for WebSearchTool {
         input: Self::Input,
         event_stream: ToolCallEventStream,
         cx: &mut App,
-    ) -> Task<Result<Self::Output, Self::Output>> {
+    ) -> Task<Result<Self::Output>> {
         let settings = AgentSettings::get_global(cx);
         let decision = decide_permission_from_settings(
             Self::NAME,
@@ -87,7 +81,7 @@ impl AgentTool for WebSearchTool {
         let authorize = match decision {
             ToolPermissionDecision::Allow => None,
             ToolPermissionDecision::Deny(reason) => {
-                return Task::ready(Err(WebSearchToolOutput::Error { error: reason }));
+                return Task::ready(Err(anyhow!("{}", reason)));
             }
             ToolPermissionDecision::Confirm => {
                 let context =
@@ -101,15 +95,13 @@ impl AgentTool for WebSearchTool {
         };
 
         let Some(provider) = WebSearchRegistry::read_global(cx).active_provider() else {
-            return Task::ready(Err(WebSearchToolOutput::Error {
-                error: "Web search is not available.".to_string(),
-            }));
+            return Task::ready(Err(anyhow!("Web search is not available.")));
         };
 
         let search_task = provider.search(input.query, cx);
         cx.background_spawn(async move {
             if let Some(authorize) = authorize {
-                authorize.await.map_err(|e| WebSearchToolOutput::Error { error: e.to_string() })?;
+                authorize.await?;
             }
 
             let response = futures::select! {
@@ -119,17 +111,17 @@ impl AgentTool for WebSearchTool {
                         Err(err) => {
                             event_stream
                                 .update_fields(acp::ToolCallUpdateFields::new().title("Web Search Failed"));
-                            return Err(WebSearchToolOutput::Error { error: err.to_string() });
+                            return Err(err);
                         }
                     }
                 }
                 _ = event_stream.cancelled_by_user().fuse() => {
-                    return Err(WebSearchToolOutput::Error { error: "Web search cancelled by user".to_string() });
+                    anyhow::bail!("Web search cancelled by user");
                 }
             };
 
             emit_update(&response, &event_stream);
-            Ok(WebSearchToolOutput::Success(response))
+            Ok(WebSearchToolOutput(response))
         })
     }
 
@@ -140,9 +132,7 @@ impl AgentTool for WebSearchTool {
         event_stream: ToolCallEventStream,
         _cx: &mut App,
     ) -> Result<()> {
-        if let WebSearchToolOutput::Success(response) = &output {
-            emit_update(response, &event_stream);
-        }
+        emit_update(&output.0, &event_stream);
         Ok(())
     }
 }
