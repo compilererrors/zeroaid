@@ -25,6 +25,12 @@ More areas may be trimmed over time if they are not needed for the core editor w
 - Collaboration/calls/audio settings pages are hidden when `collab` is not enabled.
 - Title bar initialization remains enabled so the top bar/UI does not disappear in lean builds.
 
+### Build Behavior (Important)
+
+- Lean is the default in this fork.
+- You do not need `--no-default-features` or `-n` for normal lean builds.
+- Extra functionality is opt-in via `--features ...`.
+
 ### How to Run
 
 Lean (default, without AI/collab/audio):
@@ -74,7 +80,7 @@ script/bundle-mac -f collab
 script/bundle-mac -f ai,collab
 ```
 
-Explicitly without default features (same effect as lean here):
+Optional explicit lean (same result as default):
 
 ```bash
 script/bundle-mac -n
