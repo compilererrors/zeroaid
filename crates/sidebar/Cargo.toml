@@ -20,10 +20,9 @@ test-support = []
 acp_thread = { workspace = true, optional = true }
 agent_ui = { workspace = true, optional = true }
 chrono.workspace = true
-db.workspace = true
 fs.workspace = true
 fuzzy.workspace = true
-serde_json.workspace = true
+db.workspace = true
 gpui.workspace = true
 picker.workspace = true
 project.workspace = true
@@ -33,6 +32,7 @@ ui.workspace = true
 ui_input.workspace = true
 util.workspace = true
 workspace.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 editor.workspace = true

@@ -13,7 +13,7 @@ path = "src/workspace.rs"
 doctest = false
 
 [features]
-collab = ["dep:call"]
+collab = []
 test-support = [
     "collab",
     "call/test-support",
@@ -32,7 +32,6 @@ test-support = [
 any_vec.workspace = true
 anyhow.workspace = true
 async-recursion.workspace = true
-call = { workspace = true, optional = true }
 client.workspace = true
 chrono.workspace = true
 clock.workspace = true
