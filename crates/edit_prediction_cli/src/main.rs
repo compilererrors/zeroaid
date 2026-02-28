@@ -36,6 +36,7 @@ use zeta_prompt::ZetaFormat;
 
 use reqwest_client::ReqwestClient;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::env;
 use std::fmt::Display;
 use std::fs::{File, OpenOptions};
 use std::hash::{Hash, Hasher};
@@ -295,6 +296,9 @@ struct EvalArgs {
     /// Path to write summary scores as JSON
     #[clap(long)]
     summary_json: Option<PathBuf>,
+    /// Print all individual example lines (default: up to 20)
+    #[clap(long)]
+    verbose: bool,
 }
 
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq, Hash)]
@@ -791,8 +795,18 @@ fn main() {
             return;
         }
         Command::Synthesize(synth_args) => {
-            let Some(output_dir) = args.output else {
-                panic!("output dir is required");
+            let output_dir = if let Some(output_dir) = args.output {
+                output_dir
+            } else {
+                let default_output_dir = env::current_dir()
+                    .unwrap()
+                    .join("crates/edit_prediction_cli/evals-generated");
+                if default_output_dir.parent().unwrap().exists() {
+                    std::fs::create_dir(&default_output_dir).ok();
+                    default_output_dir
+                } else {
+                    panic!("output dir is required");
+                }
             };
             let config = SynthesizeConfig {
                 repo_urls: synth_args.repos.clone(),
@@ -1133,7 +1147,7 @@ fn main() {
                 match &command {
                     Command::Eval(args) => {
                         let examples = finished_examples.lock().unwrap();
-                        score::print_report(&examples);
+                        score::print_report(&examples, args.verbose);
                         if let Some(summary_path) = &args.summary_json {
                             score::write_summary_json(&examples, summary_path)?;
                         }

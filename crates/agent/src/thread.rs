@@ -1,14 +1,16 @@
 use crate::{
-    AgentGitWorktreeInfo, ContextServerRegistry, CopyPathTool, CreateDirectoryTool,
-    DbLanguageModel, DbThread, DeletePathTool, DiagnosticsTool, EditFileTool, FetchTool,
-    FindPathTool, GrepTool, ListDirectoryTool, MovePathTool, NowTool, OpenTool, ProjectSnapshot,
-    ReadFileTool, RestoreFileFromDiskTool, SaveFileTool, StreamingEditFileTool, SubagentTool,
+    ContextServerRegistry, CopyPathTool, CreateDirectoryTool, DbLanguageModel, DbThread,
+    DeletePathTool, DiagnosticsTool, EditFileTool, FetchTool, FindPathTool, GrepTool,
+    ListDirectoryTool, MovePathTool, NowTool, OpenTool, ProjectSnapshot, ReadFileTool,
+    RestoreFileFromDiskTool, SaveFileTool, SpawnAgentTool, StreamingEditFileTool,
     SystemPromptTemplate, Template, Templates, TerminalTool, ToolPermissionDecision, WebSearchTool,
     decide_permission_from_settings,
 };
 use acp_thread::{MentionUri, UserMessageId};
 use action_log::ActionLog;
-use feature_flags::{FeatureFlagAppExt as _, SubagentsFeatureFlag};
+use feature_flags::{
+    FeatureFlagAppExt as _, StreamingEditFileToolFeatureFlag, SubagentsFeatureFlag,
+};
 
 use agent_client_protocol as acp;
 use agent_settings::{
@@ -43,11 +45,13 @@ use language_model::{
 use project::Project;
 use prompt_store::ProjectContext;
 use schemars::{JsonSchema, Schema};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use settings::{LanguageModelSelection, Settings, ToolPermissionMode, update_settings_file};
 use smol::stream::StreamExt;
 use std::{
     collections::BTreeMap,
+    marker::PhantomData,
     ops::RangeInclusive,
     path::Path,
     rc::Rc,
@@ -601,7 +605,7 @@ pub trait TerminalHandle {
 
 pub trait SubagentHandle {
     fn id(&self) -> acp::SessionId;
-    fn wait_for_output(&self, cx: &AsyncApp) -> Task<Result<String>>;
+    fn run_turn(&self, message: String, cx: &AsyncApp) -> Task<Result<String>>;
 }
 
 pub trait ThreadEnvironment {
@@ -613,14 +617,17 @@ pub trait ThreadEnvironment {
         cx: &mut AsyncApp,
     ) -> Task<Result<Rc<dyn TerminalHandle>>>;
 
-    fn create_subagent(
+    fn create_subagent(&self, label: String, cx: &mut App) -> Result<Rc<dyn SubagentHandle>>;
+
+    fn resume_subagent(
         &self,
-        parent_thread: Entity<Thread>,
-        label: String,
-        initial_prompt: String,
-        timeout: Option<Duration>,
-        cx: &mut App,
-    ) -> Result<Rc<dyn SubagentHandle>>;
+        _session_id: acp::SessionId,
+        _cx: &mut App,
+    ) -> Result<Rc<dyn SubagentHandle>> {
+        Err(anyhow::anyhow!(
+            "Resuming subagent sessions is not supported"
+        ))
+    }
 }
 
 #[derive(Debug)]
@@ -889,8 +896,6 @@ pub struct Thread {
     subagent_context: Option<SubagentContext>,
     /// Weak references to running subagent threads for cancellation propagation
     running_subagents: Vec<WeakEntity<Thread>>,
-    /// Git worktree info if this thread is running in an agent worktree.
-    git_worktree_info: Option<AgentGitWorktreeInfo>,
 }
 
 impl Thread {
@@ -981,7 +986,6 @@ impl Thread {
             imported: false,
             subagent_context: None,
             running_subagents: Vec::new(),
-            git_worktree_info: None,
         }
     }
 
@@ -1206,7 +1210,6 @@ impl Thread {
             imported: db_thread.imported,
             subagent_context: db_thread.subagent_context,
             running_subagents: Vec::new(),
-            git_worktree_info: db_thread.git_worktree_info,
         }
     }
 
@@ -1227,7 +1230,6 @@ impl Thread {
             profile: Some(self.profile_id.clone()),
             imported: self.imported,
             subagent_context: self.subagent_context.clone(),
-            git_worktree_info: self.git_worktree_info.clone(),
         };
 
         cx.background_spawn(async move {
@@ -1347,7 +1349,6 @@ impl Thread {
             self.project.clone(),
             cx.weak_entity(),
             language_registry,
-            Templates::new(),
         ));
         self.add_tool(FetchTool::new(self.project.read(cx).client().http_client()));
         self.add_tool(FindPathTool::new(self.project.clone()));
@@ -1367,7 +1368,7 @@ impl Thread {
         self.add_tool(WebSearchTool);
 
         if cx.has_flag::<SubagentsFeatureFlag>() && self.depth() < MAX_SUBAGENT_DEPTH {
-            self.add_tool(SubagentTool::new(cx.weak_entity(), environment));
+            self.add_tool(SpawnAgentTool::new(environment));
         }
     }
 
@@ -1651,6 +1652,7 @@ impl Thread {
             event_stream: event_stream.clone(),
             tools: self.enabled_tools(profile, &model, cx),
             cancellation_tx,
+            streaming_tool_inputs: HashMap::default(),
             _task: cx.spawn(async move |this, cx| {
                 log::debug!("Starting agent turn execution");
 
@@ -2055,10 +2057,6 @@ impl Thread {
 
         self.send_or_update_tool_use(&tool_use, title, kind, event_stream);
 
-        if !tool_use.is_input_complete {
-            return None;
-        }
-
         let Some(tool) = tool else {
             let content = format!("No tool named {} exists", tool_use.name);
             return Some(Task::ready(LanguageModelToolResult {
@@ -2070,9 +2068,72 @@ impl Thread {
             }));
         };
 
+        if !tool_use.is_input_complete {
+            if tool.supports_input_streaming() {
+                let running_turn = self.running_turn.as_mut()?;
+                if let Some(sender) = running_turn.streaming_tool_inputs.get(&tool_use.id) {
+                    sender.send_partial(tool_use.input);
+                    return None;
+                }
+
+                let (sender, tool_input) = ToolInputSender::channel();
+                sender.send_partial(tool_use.input);
+                running_turn
+                    .streaming_tool_inputs
+                    .insert(tool_use.id.clone(), sender);
+
+                let tool = tool.clone();
+                log::debug!("Running streaming tool {}", tool_use.name);
+                return Some(self.run_tool(
+                    tool,
+                    tool_input,
+                    tool_use.id,
+                    tool_use.name,
+                    event_stream,
+                    cancellation_rx,
+                    cx,
+                ));
+            } else {
+                return None;
+            }
+        }
+
+        if let Some(sender) = self
+            .running_turn
+            .as_mut()?
+            .streaming_tool_inputs
+            .remove(&tool_use.id)
+        {
+            sender.send_final(tool_use.input);
+            return None;
+        }
+
+        log::debug!("Running tool {}", tool_use.name);
+        let tool_input = ToolInput::ready(tool_use.input);
+        Some(self.run_tool(
+            tool,
+            tool_input,
+            tool_use.id,
+            tool_use.name,
+            event_stream,
+            cancellation_rx,
+            cx,
+        ))
+    }
+
+    fn run_tool(
+        &self,
+        tool: Arc<dyn AnyAgentTool>,
+        tool_input: ToolInput<serde_json::Value>,
+        tool_use_id: LanguageModelToolUseId,
+        tool_name: Arc<str>,
+        event_stream: &ThreadEventStream,
+        cancellation_rx: watch::Receiver<bool>,
+        cx: &mut Context<Self>,
+    ) -> Task<LanguageModelToolResult> {
         let fs = self.project.read(cx).fs().clone();
         let tool_event_stream = ToolCallEventStream::new(
-            tool_use.id.clone(),
+            tool_use_id.clone(),
             event_stream.clone(),
             Some(fs),
             cancellation_rx,
@@ -2081,37 +2142,32 @@ impl Thread {
             acp::ToolCallUpdateFields::new().status(acp::ToolCallStatus::InProgress),
         );
         let supports_images = self.model().is_some_and(|model| model.supports_images());
-        let tool_result = tool.run(tool_use.input, tool_event_stream, cx);
-        log::debug!("Running tool {}", tool_use.name);
-        Some(cx.foreground_executor().spawn(async move {
-            let tool_result = tool_result.await.and_then(|output| {
-                if let LanguageModelToolResultContent::Image(_) = &output.llm_output
-                    && !supports_images
-                {
-                    return Err(anyhow!(
-                        "Attempted to read an image, but this model doesn't support it.",
-                    ));
+        let tool_result = tool.run(tool_input, tool_event_stream, cx);
+        cx.foreground_executor().spawn(async move {
+            let (is_error, output) = match tool_result.await {
+                Ok(mut output) => {
+                    if let LanguageModelToolResultContent::Image(_) = &output.llm_output
+                        && !supports_images
+                    {
+                        output = AgentToolOutput::from_error(
+                            "Attempted to read an image, but this model doesn't support it.",
+                        );
+                        (true, output)
+                    } else {
+                        (false, output)
+                    }
                 }
-                Ok(output)
-            });
+                Err(output) => (true, output),
+            };
 
-            match tool_result {
-                Ok(output) => LanguageModelToolResult {
-                    tool_use_id: tool_use.id,
-                    tool_name: tool_use.name,
-                    is_error: false,
-                    content: output.llm_output,
-                    output: Some(output.raw_output),
-                },
-                Err(error) => LanguageModelToolResult {
-                    tool_use_id: tool_use.id,
-                    tool_name: tool_use.name,
-                    is_error: true,
-                    content: LanguageModelToolResultContent::Text(Arc::from(error.to_string())),
-                    output: Some(error.to_string().into()),
-                },
+            LanguageModelToolResult {
+                tool_use_id,
+                tool_name,
+                is_error,
+                content: output.llm_output,
+                output: Some(output.raw_output),
             }
-        }))
+        })
     }
 
     fn handle_tool_use_json_parse_error_event(
@@ -2397,6 +2453,7 @@ impl Thread {
                         name: tool_name.to_string(),
                         description: tool.description().to_string(),
                         input_schema: tool.input_schema(model.tool_input_format()).log_err()?,
+                        use_input_streaming: tool.supports_input_streaming(),
                     })
                 })
                 .collect::<Vec<_>>()
@@ -2450,7 +2507,7 @@ impl Thread {
             }
         }
 
-        let use_streaming_edit_tool = false;
+        let use_streaming_edit_tool = cx.has_flag::<StreamingEditFileToolFeatureFlag>();
 
         let mut tools = self
             .tools
@@ -2767,6 +2824,9 @@ struct RunningTurn {
     /// Sender to signal tool cancellation. When cancel is called, this is
     /// set to true so all tools can detect user-initiated cancellation.
     cancellation_tx: watch::Sender<bool>,
+    /// Senders for tools that support input streaming and have already been
+    /// started but are still receiving input from the LLM.
+    streaming_tool_inputs: HashMap<LanguageModelToolUseId, ToolInputSender>,
 }
 
 impl RunningTurn {
@@ -2785,6 +2845,103 @@ impl EventEmitter<TokenUsageUpdated> for Thread {}
 pub struct TitleUpdated;
 
 impl EventEmitter<TitleUpdated> for Thread {}
+
+/// A channel-based wrapper that delivers tool input to a running tool.
+///
+/// For non-streaming tools, created via `ToolInput::ready()` so `.recv()` resolves immediately.
+/// For streaming tools, partial JSON snapshots arrive via `.recv_partial()` as the LLM streams
+/// them, followed by the final complete input available through `.recv()`.
+pub struct ToolInput<T> {
+    partial_rx: mpsc::UnboundedReceiver<serde_json::Value>,
+    final_rx: oneshot::Receiver<serde_json::Value>,
+    _phantom: PhantomData<T>,
+}
+
+impl<T: DeserializeOwned> ToolInput<T> {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn resolved(input: impl Serialize) -> Self {
+        let value = serde_json::to_value(input).expect("failed to serialize tool input");
+        Self::ready(value)
+    }
+
+    pub fn ready(value: serde_json::Value) -> Self {
+        let (partial_tx, partial_rx) = mpsc::unbounded();
+        drop(partial_tx);
+        let (final_tx, final_rx) = oneshot::channel();
+        final_tx.send(value).ok();
+        Self {
+            partial_rx,
+            final_rx,
+            _phantom: PhantomData,
+        }
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn test() -> (ToolInputSender, Self) {
+        let (sender, input) = ToolInputSender::channel();
+        (sender, input.cast())
+    }
+
+    /// Wait for the final deserialized input, ignoring all partial updates.
+    /// Non-streaming tools can use this to wait until the whole input is available.
+    pub async fn recv(mut self) -> Result<T> {
+        // Drain any remaining partials
+        while self.partial_rx.next().await.is_some() {}
+        let value = self
+            .final_rx
+            .await
+            .map_err(|_| anyhow!("tool input sender was dropped before sending final input"))?;
+        serde_json::from_value(value).map_err(Into::into)
+    }
+
+    /// Returns the next partial JSON snapshot, or `None` when input is complete.
+    /// Once this returns `None`, call `recv()` to get the final input.
+    pub async fn recv_partial(&mut self) -> Option<serde_json::Value> {
+        self.partial_rx.next().await
+    }
+
+    fn cast<U: DeserializeOwned>(self) -> ToolInput<U> {
+        ToolInput {
+            partial_rx: self.partial_rx,
+            final_rx: self.final_rx,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+pub struct ToolInputSender {
+    partial_tx: mpsc::UnboundedSender<serde_json::Value>,
+    final_tx: Option<oneshot::Sender<serde_json::Value>>,
+}
+
+impl ToolInputSender {
+    pub(crate) fn channel() -> (Self, ToolInput<serde_json::Value>) {
+        let (partial_tx, partial_rx) = mpsc::unbounded();
+        let (final_tx, final_rx) = oneshot::channel();
+        let sender = Self {
+            partial_tx,
+            final_tx: Some(final_tx),
+        };
+        let input = ToolInput {
+            partial_rx,
+            final_rx,
+            _phantom: PhantomData,
+        };
+        (sender, input)
+    }
+
+    pub(crate) fn send_partial(&self, value: serde_json::Value) {
+        self.partial_tx.unbounded_send(value).ok();
+    }
+
+    pub(crate) fn send_final(mut self, value: serde_json::Value) {
+        // Close the partial channel so recv_partial() returns None
+        self.partial_tx.close_channel();
+        if let Some(final_tx) = self.final_tx.take() {
+            final_tx.send(value).ok();
+        }
+    }
+}
 
 pub trait AgentTool
 where
@@ -2819,6 +2976,11 @@ where
         language_model::tool_schema::root_schema_for::<Self::Input>(format)
     }
 
+    /// Returns whether the tool supports streaming of tool use parameters.
+    fn supports_input_streaming() -> bool {
+        false
+    }
+
     /// Some tools rely on a provider for the underlying billing or other reasons.
     /// Allow the tool to check if they are compatible, or should be filtered out.
     fn supports_provider(_provider: &LanguageModelProviderId) -> bool {
@@ -2826,12 +2988,18 @@ where
     }
 
     /// Runs the tool with the provided input.
+    ///
+    /// Returns `Result<Self::Output, Self::Output>` rather than `Result<Self::Output, anyhow::Error>`
+    /// because tool errors are sent back to the model as tool results. This means error output must
+    /// be structured and readable by the agent — not an arbitrary `anyhow::Error`. Returning the
+    /// same `Output` type for both success and failure lets tools provide structured data while
+    /// still signaling whether the invocation succeeded or failed.
     fn run(
         self: Arc<Self>,
-        input: Self::Input,
+        input: ToolInput<Self::Input>,
         event_stream: ToolCallEventStream,
         cx: &mut App,
-    ) -> Task<Result<Self::Output>>;
+    ) -> Task<Result<Self::Output, Self::Output>>;
 
     /// Emits events for a previous execution of the tool.
     fn replay(
@@ -2856,21 +3024,36 @@ pub struct AgentToolOutput {
     pub raw_output: serde_json::Value,
 }
 
+impl AgentToolOutput {
+    pub fn from_error(message: impl Into<String>) -> Self {
+        let message = message.into();
+        let llm_output = LanguageModelToolResultContent::Text(Arc::from(message.as_str()));
+        Self {
+            raw_output: serde_json::Value::String(message),
+            llm_output,
+        }
+    }
+}
+
 pub trait AnyAgentTool {
     fn name(&self) -> SharedString;
     fn description(&self) -> SharedString;
     fn kind(&self) -> acp::ToolKind;
     fn initial_title(&self, input: serde_json::Value, _cx: &mut App) -> SharedString;
     fn input_schema(&self, format: LanguageModelToolSchemaFormat) -> Result<serde_json::Value>;
+    fn supports_input_streaming(&self) -> bool {
+        false
+    }
     fn supports_provider(&self, _provider: &LanguageModelProviderId) -> bool {
         true
     }
+    /// See [`AgentTool::run`] for why this returns `Result<AgentToolOutput, AgentToolOutput>`.
     fn run(
         self: Arc<Self>,
-        input: serde_json::Value,
+        input: ToolInput<serde_json::Value>,
         event_stream: ToolCallEventStream,
         cx: &mut App,
-    ) -> Task<Result<AgentToolOutput>>;
+    ) -> Task<Result<AgentToolOutput, AgentToolOutput>>;
     fn replay(
         &self,
         input: serde_json::Value,
@@ -2896,6 +3079,10 @@ where
         T::kind()
     }
 
+    fn supports_input_streaming(&self) -> bool {
+        T::supports_input_streaming()
+    }
+
     fn initial_title(&self, input: serde_json::Value, _cx: &mut App) -> SharedString {
         let parsed_input = serde_json::from_value(input.clone()).map_err(|_| input);
         self.0.initial_title(parsed_input, _cx)
@@ -2913,20 +3100,32 @@ where
 
     fn run(
         self: Arc<Self>,
-        input: serde_json::Value,
+        input: ToolInput<serde_json::Value>,
         event_stream: ToolCallEventStream,
         cx: &mut App,
-    ) -> Task<Result<AgentToolOutput>> {
-        cx.spawn(async move |cx| {
-            let input = serde_json::from_value(input)?;
-            let output = cx
-                .update(|cx| self.0.clone().run(input, event_stream, cx))
-                .await?;
-            let raw_output = serde_json::to_value(&output)?;
-            Ok(AgentToolOutput {
-                llm_output: output.into(),
-                raw_output,
-            })
+    ) -> Task<Result<AgentToolOutput, AgentToolOutput>> {
+        let tool_input: ToolInput<T::Input> = input.cast();
+        let task = self.0.clone().run(tool_input, event_stream, cx);
+        cx.spawn(async move |_cx| match task.await {
+            Ok(output) => {
+                let raw_output = serde_json::to_value(&output).map_err(|e| {
+                    AgentToolOutput::from_error(format!("Failed to serialize tool output: {e}"))
+                })?;
+                Ok(AgentToolOutput {
+                    llm_output: output.into(),
+                    raw_output,
+                })
+            }
+            Err(error_output) => {
+                let raw_output = serde_json::to_value(&error_output).unwrap_or_else(|e| {
+                    log::error!("Failed to serialize tool error output: {e}");
+                    serde_json::Value::Null
+                });
+                Err(AgentToolOutput {
+                    llm_output: error_output.into(),
+                    raw_output,
+                })
+            }
         })
     }
 

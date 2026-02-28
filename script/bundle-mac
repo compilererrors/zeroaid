@@ -167,7 +167,12 @@ trap restore_bundle_manifest EXIT
 
 app_path=$(
     bundle_stderr=$(mktemp)
+    bundle_term="${TERM:-}"
+    if [[ -z "${bundle_term}" || "${bundle_term}" == "dumb" ]]; then
+        bundle_term="xterm-256color"
+    fi
     set +e
+    TERM="${bundle_term}" \
     NO_COLOR=1 \
     CARGO_TERM_COLOR=never \
     CLICOLOR=0 \
