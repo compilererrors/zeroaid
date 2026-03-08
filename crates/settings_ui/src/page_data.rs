@@ -7,14 +7,14 @@ use std::sync::{Arc, OnceLock};
 use strum::{EnumMessage, IntoDiscriminant as _, VariantArray};
 use ui::IntoElement;
 
-use crate::{
-    ActionLink, DynamicItem, PROJECT, SettingField, SettingItem, SettingsFieldMetadata,
-    SettingsPage, SettingsPageItem, SubPageLink, USER, active_language, all_language_names,
-};
 #[cfg(feature = "collab")]
 use crate::pages::open_audio_test_window;
 #[cfg(feature = "ai")]
 use crate::pages::{render_edit_prediction_setup_page, render_tool_permissions_setup_page};
+use crate::{
+    ActionLink, DynamicItem, PROJECT, SettingField, SettingItem, SettingsFieldMetadata,
+    SettingsPage, SettingsPageItem, SubPageLink, USER, active_language, all_language_names,
+};
 
 const DEFAULT_STRING: String = String::new();
 /// A default empty string reference. Useful in `pick` functions for cases either in dynamic item fields, or when dealing with `settings::Maybe`
@@ -7927,12 +7927,12 @@ fn language_settings_data() -> Box<[SettingsPageItem]> {
         ]
     }
 
-    fn whitespace_section() -> [SettingsPageItem; 4] {
+    fn whitespace_section() -> [SettingsPageItem; 7] {
         [
             SettingsPageItem::SectionHeader("Whitespace"),
             SettingsPageItem::SettingItem(SettingItem {
                 title: "Show Whitespaces",
-                description: "Whether to show tabs and spaces in the editor.",
+                description: "Whether to show tabs, spaces, and line endings in the editor.",
                 field: Box::new(SettingField {
                     json_path: Some("languages.$(language).show_whitespaces"),
                     pick: |settings_content| {
@@ -7950,55 +7950,110 @@ fn language_settings_data() -> Box<[SettingsPageItem]> {
                 files: USER | PROJECT,
             }),
             SettingsPageItem::SettingItem(SettingItem {
+                title: "Control Character Style",
+                description: "How ASCII control characters are rendered when they appear in the editor. Use caret_notation for TextMate-style sequences like \"^O\".",
+                field: Box::new(SettingField {
+                    json_path: Some("languages.$(language).control_character_style"),
+                    pick: |settings_content| {
+                        language_settings_field(settings_content, |language| {
+                            language.control_character_style.as_ref()
+                        })
+                    },
+                    write: |settings_content, value| {
+                        language_settings_field_mut(settings_content, value, |language, value| {
+                            language.control_character_style = value;
+                        })
+                    },
+                }),
+                metadata: None,
+                files: USER | PROJECT,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
                 title: "Space Whitespace Indicator",
                 description: "Visible character used to render space characters when show_whitespaces is enabled (default: \"•\")",
-                field: Box::new(
-                    SettingField {
-                        json_path: Some("languages.$(language).whitespace_map.space"),
-                        pick: |settings_content| {
-                            language_settings_field(settings_content, |language| {
-                                language.whitespace_map.as_ref()?.space.as_ref()
-                            })
-                        },
-                        write: |settings_content, value| {
-                            language_settings_field_mut(
-                                settings_content,
-                                value,
-                                |language, value| {
-                                    language.whitespace_map.get_or_insert_default().space = value;
-                                },
-                            )
-                        },
-                    }
-                    .unimplemented(),
-                ),
-                metadata: None,
+                field: Box::new(SettingField {
+                    json_path: Some("languages.$(language).whitespace_map.space"),
+                    pick: |settings_content| {
+                        language_settings_field(settings_content, |language| {
+                            language.whitespace_map.as_ref()?.space.as_ref()
+                        })
+                    },
+                    write: |settings_content, value| {
+                        language_settings_field_mut(settings_content, value, |language, value| {
+                            language.whitespace_map.get_or_insert_default().space = value;
+                        })
+                    },
+                }),
+                metadata: Some(Box::new(SettingsFieldMetadata {
+                    placeholder: Some("•"),
+                    ..Default::default()
+                })),
                 files: USER | PROJECT,
             }),
             SettingsPageItem::SettingItem(SettingItem {
                 title: "Tab Whitespace Indicator",
                 description: "Visible character used to render tab characters when show_whitespaces is enabled (default: \"→\")",
-                field: Box::new(
-                    SettingField {
-                        json_path: Some("languages.$(language).whitespace_map.tab"),
-                        pick: |settings_content| {
-                            language_settings_field(settings_content, |language| {
-                                language.whitespace_map.as_ref()?.tab.as_ref()
-                            })
-                        },
-                        write: |settings_content, value| {
-                            language_settings_field_mut(
-                                settings_content,
-                                value,
-                                |language, value| {
-                                    language.whitespace_map.get_or_insert_default().tab = value;
-                                },
-                            )
-                        },
-                    }
-                    .unimplemented(),
-                ),
-                metadata: None,
+                field: Box::new(SettingField {
+                    json_path: Some("languages.$(language).whitespace_map.tab"),
+                    pick: |settings_content| {
+                        language_settings_field(settings_content, |language| {
+                            language.whitespace_map.as_ref()?.tab.as_ref()
+                        })
+                    },
+                    write: |settings_content, value| {
+                        language_settings_field_mut(settings_content, value, |language, value| {
+                            language.whitespace_map.get_or_insert_default().tab = value;
+                        })
+                    },
+                }),
+                metadata: Some(Box::new(SettingsFieldMetadata {
+                    placeholder: Some("→"),
+                    ..Default::default()
+                })),
+                files: USER | PROJECT,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: "Line Ending Indicator",
+                description: "Visible character used to render line ending characters when show_whitespaces is enabled (default: \"¬\")",
+                field: Box::new(SettingField {
+                    json_path: Some("languages.$(language).whitespace_map.eol"),
+                    pick: |settings_content| {
+                        language_settings_field(settings_content, |language| {
+                            language.whitespace_map.as_ref()?.eol.as_ref()
+                        })
+                    },
+                    write: |settings_content, value| {
+                        language_settings_field_mut(settings_content, value, |language, value| {
+                            language.whitespace_map.get_or_insert_default().eol = value;
+                        })
+                    },
+                }),
+                metadata: Some(Box::new(SettingsFieldMetadata {
+                    placeholder: Some("¬"),
+                    ..Default::default()
+                })),
+                files: USER | PROJECT,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: "Carriage Return Indicator",
+                description: "Visible character used to render carriage return characters when show_whitespaces is enabled (default: \"¤\")",
+                field: Box::new(SettingField {
+                    json_path: Some("languages.$(language).whitespace_map.cr"),
+                    pick: |settings_content| {
+                        language_settings_field(settings_content, |language| {
+                            language.whitespace_map.as_ref()?.cr.as_ref()
+                        })
+                    },
+                    write: |settings_content, value| {
+                        language_settings_field_mut(settings_content, value, |language, value| {
+                            language.whitespace_map.get_or_insert_default().cr = value;
+                        })
+                    },
+                }),
+                metadata: Some(Box::new(SettingsFieldMetadata {
+                    placeholder: Some("¤"),
+                    ..Default::default()
+                })),
                 files: USER | PROJECT,
             }),
         ]

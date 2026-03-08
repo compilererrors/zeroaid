@@ -288,7 +288,10 @@ impl Client {
                     cx,
                 )
             } else {
-                log::error!("Unhandled JSON from context_server ({} bytes)", message.len());
+                log::error!(
+                    "Unhandled JSON from context_server ({} bytes)",
+                    message.len()
+                );
             }
         }
 

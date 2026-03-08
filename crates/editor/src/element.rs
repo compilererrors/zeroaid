@@ -42,14 +42,14 @@ use gpui::{
     Action, Along, AnyElement, App, AppContext, AvailableSpace, Axis as ScrollbarAxis, BorderStyle,
     Bounds, ClickEvent, ClipboardItem, ContentMask, Context, Corner, Corners, CursorStyle,
     DispatchPhase, Edges, Element, ElementInputHandler, Entity, Focusable as _, FontId, FontWeight,
-    GlobalElementId, Hitbox, HitboxBehavior, Hsla, InteractiveElement, IntoElement, IsZero,
-    KeybindingKeystroke, Length, Modifiers, ModifiersChangedEvent, MouseButton, MouseClickEvent,
-    MouseDownEvent, MouseMoveEvent, MousePressureEvent, MouseUpEvent, PaintQuad, ParentElement,
-    Pixels, PressureStage, ScrollDelta, ScrollHandle, ScrollWheelEvent, ShapedLine, SharedString,
-    Size, StatefulInteractiveElement, Style, Styled, StyledText, TextAlign, TextRun,
-    TextStyleRefinement, WeakEntity, Window, anchored, deferred, div, fill, linear_color_stop,
-    linear_gradient, outline, pattern_slash, point, px, quad, relative, size, solid_background,
-    transparent_black,
+    GlobalElementId, HighlightStyle, Hitbox, HitboxBehavior, Hsla, InteractiveElement, IntoElement,
+    IsZero, KeybindingKeystroke, Length, Modifiers, ModifiersChangedEvent, MouseButton,
+    MouseClickEvent, MouseDownEvent, MouseMoveEvent, MousePressureEvent, MouseUpEvent, PaintQuad,
+    ParentElement, Pixels, PressureStage, ScrollDelta, ScrollHandle, ScrollWheelEvent, ShapedLine,
+    SharedString, Size, StatefulInteractiveElement, Style, Styled, StyledText, TextAlign, TextRun,
+    TextStyle, TextStyleRefinement, WeakEntity, Window, anchored, deferred, div, fill,
+    linear_color_stop, linear_gradient, outline, pattern_slash, point, px, quad, relative, size,
+    solid_background, transparent_black,
 };
 use itertools::Itertools;
 use language::{IndentGuideSettings, language_settings::ShowWhitespaceSetting};
@@ -85,7 +85,7 @@ use std::{
     time::{Duration, Instant},
 };
 use sum_tree::Bias;
-use text::{BufferId, SelectionGoal};
+use text::{BufferId, LineEnding, SelectionGoal};
 use theme::{ActiveTheme, Appearance, BufferLineHeight, PlayerColor};
 use ui::utils::ensure_minimum_contrast;
 use ui::{
@@ -497,6 +497,7 @@ impl EditorElement {
         register_action(editor, window, Editor::toggle_soft_wrap);
         register_action(editor, window, Editor::toggle_tab_bar);
         register_action(editor, window, Editor::toggle_line_numbers);
+        register_action(editor, window, Editor::toggle_whitespaces);
         register_action(editor, window, Editor::toggle_relative_line_numbers);
         register_action(editor, window, Editor::toggle_indent_guides);
         register_action(editor, window, Editor::toggle_inlay_hints);
@@ -3823,6 +3824,12 @@ impl EditorElement {
                 &snapshot.mode,
                 editor_width,
                 is_row_soft_wrapped,
+                |row_offset| {
+                    line_ending_for_display_row(
+                        snapshot,
+                        rows.start + DisplayRow(row_offset as u32),
+                    )
+                },
                 bg_segments_per_row,
                 window,
                 cx,
@@ -6632,13 +6639,7 @@ impl EditorElement {
         window: &mut Window,
         cx: &mut App,
     ) {
-        let whitespace_setting = self
-            .editor
-            .read(cx)
-            .buffer
-            .read(cx)
-            .language_settings(cx)
-            .show_whitespaces;
+        let whitespace_setting = self.editor.read(cx).whitespace_setting(cx);
 
         for (ix, line_with_invisibles) in layout.position_map.line_layouts.iter().enumerate() {
             let row = DisplayRow(layout.visible_display_row_range.start.0 + ix as u32);
@@ -6673,13 +6674,7 @@ impl EditorElement {
             return;
         }
 
-        let whitespace_setting = self
-            .editor
-            .read(cx)
-            .buffer
-            .read(cx)
-            .language_settings(cx)
-            .show_whitespaces;
+        let whitespace_setting = self.editor.read(cx).whitespace_setting(cx);
         sticky_headers.paint(layout, whitespace_setting, window, cx);
 
         let sticky_header_hitboxes: Vec<Hitbox> = sticky_headers
@@ -8777,6 +8772,7 @@ impl LineWithInvisibles {
         editor_mode: &EditorMode,
         text_width: Pixels,
         is_row_soft_wrapped: impl Copy + Fn(usize) -> bool,
+        line_ending_for_row: impl Copy + Fn(usize) -> Option<LineEnding>,
         bg_segments_per_row: &[Vec<(Range<DisplayPoint>, Hsla)>],
         window: &mut Window,
         cx: &mut App,
@@ -8797,32 +8793,21 @@ impl LineWithInvisibles {
 
         let ellipsis = SharedString::from("⋯");
 
-        for highlighted_chunk in chunks.chain([HighlightedChunk {
-            text: "\n",
-            style: None,
-            is_tab: false,
-            is_inlay: false,
-            replacement: None,
-        }]) {
+        for highlighted_chunk in chunks {
             if let Some(replacement) = highlighted_chunk.replacement {
                 if !line.is_empty() {
-                    let segments = bg_segments_per_row.get(row).map(|v| &v[..]).unwrap_or(&[]);
-                    let text_runs: &[TextRun] = if segments.is_empty() {
-                        &styles
-                    } else {
-                        &Self::split_runs_by_bg_segments(&styles, segments, min_contrast, len)
-                    };
-                    let shaped_line = window.text_system().shape_line(
-                        line.clone().into(),
+                    Self::push_pending_text_fragment(
+                        &mut line,
+                        &mut styles,
+                        &mut fragments,
+                        &mut width,
+                        &mut len,
                         font_size,
-                        text_runs,
-                        None,
+                        row,
+                        bg_segments_per_row,
+                        min_contrast,
+                        window,
                     );
-                    width += shaped_line.width;
-                    len += shaped_line.len;
-                    fragments.push(LineFragment::Text(shaped_line));
-                    line.clear();
-                    styles.clear();
                 }
 
                 match replacement {
@@ -8891,103 +8876,241 @@ impl LineWithInvisibles {
                     }
                 }
             } else {
-                for (ix, mut line_chunk) in highlighted_chunk.text.split('\n').enumerate() {
-                    if ix > 0 {
-                        let segments = bg_segments_per_row.get(row).map(|v| &v[..]).unwrap_or(&[]);
-                        let text_runs = if segments.is_empty() {
-                            &styles
-                        } else {
-                            &Self::split_runs_by_bg_segments(&styles, segments, min_contrast, len)
-                        };
-                        let shaped_line = window.text_system().shape_line(
-                            line.clone().into(),
-                            font_size,
-                            text_runs,
-                            None,
-                        );
-                        width += shaped_line.width;
-                        len += shaped_line.len;
-                        fragments.push(LineFragment::Text(shaped_line));
-                        layouts.push(Self {
-                            width: mem::take(&mut width),
-                            len: mem::take(&mut len),
-                            fragments: mem::take(&mut fragments),
-                            invisibles: std::mem::take(&mut invisibles),
-                            font_size,
-                        });
+                let mut segment_start = 0;
+                for (newline_offset, _) in highlighted_chunk.text.match_indices('\n') {
+                    Self::append_line_chunk(
+                        &highlighted_chunk.text[segment_start..newline_offset],
+                        highlighted_chunk.style,
+                        highlighted_chunk.is_tab,
+                        highlighted_chunk.is_inlay,
+                        &mut line,
+                        &mut styles,
+                        &mut invisibles,
+                        &mut non_whitespace_added,
+                        &mut line_exceeded_max_len,
+                        text_style,
+                        max_line_len,
+                        editor_mode,
+                        row,
+                        is_row_soft_wrapped,
+                    );
 
-                        line.clear();
-                        styles.clear();
-                        row += 1;
-                        line_exceeded_max_len = false;
-                        non_whitespace_added = false;
-                        if row == max_line_count {
-                            return layouts;
-                        }
+                    let line_ending = line_ending_for_row(row);
+                    Self::finish_line(
+                        &mut line,
+                        &mut styles,
+                        &mut fragments,
+                        &mut invisibles,
+                        &mut width,
+                        &mut len,
+                        &mut layouts,
+                        font_size,
+                        row,
+                        line_ending.is_some(),
+                        editor_mode,
+                        line_ending,
+                        bg_segments_per_row,
+                        min_contrast,
+                        window,
+                    );
+
+                    row += 1;
+                    line_exceeded_max_len = false;
+                    non_whitespace_added = false;
+                    if row == max_line_count {
+                        return layouts;
                     }
 
-                    if !line_chunk.is_empty() && !line_exceeded_max_len {
-                        let text_style = if let Some(style) = highlighted_chunk.style {
-                            Cow::Owned(text_style.clone().highlight(style))
-                        } else {
-                            Cow::Borrowed(text_style)
-                        };
-
-                        if line.len() + line_chunk.len() > max_line_len {
-                            let mut chunk_len = max_line_len - line.len();
-                            while !line_chunk.is_char_boundary(chunk_len) {
-                                chunk_len -= 1;
-                            }
-                            line_chunk = &line_chunk[..chunk_len];
-                            line_exceeded_max_len = true;
-                        }
-
-                        styles.push(TextRun {
-                            len: line_chunk.len(),
-                            font: text_style.font(),
-                            color: text_style.color,
-                            background_color: text_style.background_color,
-                            underline: text_style.underline,
-                            strikethrough: text_style.strikethrough,
-                        });
-
-                        if editor_mode.is_full() && !highlighted_chunk.is_inlay {
-                            // Line wrap pads its contents with fake whitespaces,
-                            // avoid printing them
-                            let is_soft_wrapped = is_row_soft_wrapped(row);
-                            if highlighted_chunk.is_tab {
-                                if non_whitespace_added || !is_soft_wrapped {
-                                    invisibles.push(Invisible::Tab {
-                                        line_start_offset: line.len(),
-                                        line_end_offset: line.len() + line_chunk.len(),
-                                    });
-                                }
-                            } else {
-                                invisibles.extend(line_chunk.char_indices().filter_map(
-                                    |(index, c)| {
-                                        let is_whitespace = c.is_whitespace();
-                                        non_whitespace_added |= !is_whitespace;
-                                        if is_whitespace
-                                            && (non_whitespace_added || !is_soft_wrapped)
-                                        {
-                                            Some(Invisible::Whitespace {
-                                                line_offset: line.len() + index,
-                                            })
-                                        } else {
-                                            None
-                                        }
-                                    },
-                                ))
-                            }
-                        }
-
-                        line.push_str(line_chunk);
-                    }
+                    segment_start = newline_offset + 1;
                 }
+
+                Self::append_line_chunk(
+                    &highlighted_chunk.text[segment_start..],
+                    highlighted_chunk.style,
+                    highlighted_chunk.is_tab,
+                    highlighted_chunk.is_inlay,
+                    &mut line,
+                    &mut styles,
+                    &mut invisibles,
+                    &mut non_whitespace_added,
+                    &mut line_exceeded_max_len,
+                    text_style,
+                    max_line_len,
+                    editor_mode,
+                    row,
+                    is_row_soft_wrapped,
+                );
             }
         }
 
+        Self::finish_line(
+            &mut line,
+            &mut styles,
+            &mut fragments,
+            &mut invisibles,
+            &mut width,
+            &mut len,
+            &mut layouts,
+            font_size,
+            row,
+            false,
+            editor_mode,
+            None,
+            bg_segments_per_row,
+            min_contrast,
+            window,
+        );
         layouts
+    }
+
+    fn push_pending_text_fragment(
+        line: &mut String,
+        styles: &mut Vec<TextRun>,
+        fragments: &mut SmallVec<[LineFragment; 1]>,
+        width: &mut Pixels,
+        len: &mut usize,
+        font_size: Pixels,
+        row: usize,
+        bg_segments_per_row: &[Vec<(Range<DisplayPoint>, Hsla)>],
+        min_contrast: f32,
+        window: &mut Window,
+    ) {
+        let segments = bg_segments_per_row.get(row).map(|v| &v[..]).unwrap_or(&[]);
+        let text_runs: &[TextRun] = if segments.is_empty() {
+            styles
+        } else {
+            &Self::split_runs_by_bg_segments(styles, segments, min_contrast, *len)
+        };
+        let shaped_line =
+            window
+                .text_system()
+                .shape_line(line.clone().into(), font_size, text_runs, None);
+        *width += shaped_line.width;
+        *len += shaped_line.len;
+        fragments.push(LineFragment::Text(shaped_line));
+        line.clear();
+        styles.clear();
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn finish_line(
+        line: &mut String,
+        styles: &mut Vec<TextRun>,
+        fragments: &mut SmallVec<[LineFragment; 1]>,
+        invisibles: &mut Vec<Invisible>,
+        width: &mut Pixels,
+        len: &mut usize,
+        layouts: &mut Vec<Self>,
+        font_size: Pixels,
+        row: usize,
+        show_line_ending: bool,
+        editor_mode: &EditorMode,
+        line_ending: Option<LineEnding>,
+        bg_segments_per_row: &[Vec<(Range<DisplayPoint>, Hsla)>],
+        min_contrast: f32,
+        window: &mut Window,
+    ) {
+        if show_line_ending && editor_mode.is_full() {
+            let line_offset = line.len();
+            if line_ending == Some(LineEnding::Windows) {
+                invisibles.push(Invisible::CarriageReturn { line_offset });
+            }
+            invisibles.push(Invisible::EndOfLine { line_offset });
+        }
+
+        Self::push_pending_text_fragment(
+            line,
+            styles,
+            fragments,
+            width,
+            len,
+            font_size,
+            row,
+            bg_segments_per_row,
+            min_contrast,
+            window,
+        );
+        layouts.push(Self {
+            width: mem::take(width),
+            len: mem::take(len),
+            fragments: mem::take(fragments),
+            invisibles: mem::take(invisibles),
+            font_size,
+        });
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn append_line_chunk<F>(
+        mut line_chunk: &str,
+        style: Option<HighlightStyle>,
+        is_tab: bool,
+        is_inlay: bool,
+        line: &mut String,
+        styles: &mut Vec<TextRun>,
+        invisibles: &mut Vec<Invisible>,
+        non_whitespace_added: &mut bool,
+        line_exceeded_max_len: &mut bool,
+        text_style: &TextStyle,
+        max_line_len: usize,
+        editor_mode: &EditorMode,
+        row: usize,
+        is_row_soft_wrapped: F,
+    ) where
+        F: Copy + Fn(usize) -> bool,
+    {
+        if line_chunk.is_empty() || *line_exceeded_max_len {
+            return;
+        }
+
+        let text_style = if let Some(style) = style {
+            Cow::Owned(text_style.clone().highlight(style))
+        } else {
+            Cow::Borrowed(text_style)
+        };
+
+        if line.len() + line_chunk.len() > max_line_len {
+            let mut chunk_len = max_line_len - line.len();
+            while !line_chunk.is_char_boundary(chunk_len) {
+                chunk_len -= 1;
+            }
+            line_chunk = &line_chunk[..chunk_len];
+            *line_exceeded_max_len = true;
+        }
+
+        styles.push(TextRun {
+            len: line_chunk.len(),
+            font: text_style.font(),
+            color: text_style.color,
+            background_color: text_style.background_color,
+            underline: text_style.underline,
+            strikethrough: text_style.strikethrough,
+        });
+
+        if editor_mode.is_full() && !is_inlay {
+            let is_soft_wrapped = is_row_soft_wrapped(row);
+            if is_tab {
+                if *non_whitespace_added || !is_soft_wrapped {
+                    invisibles.push(Invisible::Tab {
+                        line_start_offset: line.len(),
+                        line_end_offset: line.len() + line_chunk.len(),
+                    });
+                }
+            } else {
+                invisibles.extend(line_chunk.char_indices().filter_map(|(index, c)| {
+                    let is_whitespace = c.is_whitespace();
+                    *non_whitespace_added |= !is_whitespace;
+                    if is_whitespace && (*non_whitespace_added || !is_soft_wrapped) {
+                        Some(Invisible::Whitespace {
+                            line_offset: line.len() + index,
+                        })
+                    } else {
+                        None
+                    }
+                }))
+            }
+        }
+
+        line.push_str(line_chunk);
     }
 
     /// Takes text runs and non-overlapping left-to-right background ranges with color.
@@ -9248,27 +9371,66 @@ impl LineWithInvisibles {
         cx: &mut App,
     ) {
         let extract_whitespace_info = |invisible: &Invisible| {
-            let (token_offset, token_end_offset, invisible_symbol) = match invisible {
+            let (token_offset, token_end_offset, invisible_symbol, origin_x) = match invisible {
                 Invisible::Tab {
                     line_start_offset,
                     line_end_offset,
-                } => (*line_start_offset, *line_end_offset, &layout.tab_invisible),
+                } => {
+                    let x_offset: ScrollPixelOffset = self.x_for_index(*line_start_offset).into();
+                    let invisible_offset: ScrollPixelOffset = ((layout.position_map.em_width
+                        - layout.tab_invisible.width)
+                        .max(Pixels::ZERO)
+                        / 2.0)
+                        .into();
+                    (
+                        *line_start_offset,
+                        *line_end_offset,
+                        &layout.tab_invisible,
+                        Pixels::from(
+                            x_offset + invisible_offset
+                                - layout.position_map.scroll_pixel_position.x,
+                        ),
+                    )
+                }
                 Invisible::Whitespace { line_offset } => {
-                    (*line_offset, line_offset + 1, &layout.space_invisible)
+                    let x_offset: ScrollPixelOffset = self.x_for_index(*line_offset).into();
+                    let invisible_offset: ScrollPixelOffset = ((layout.position_map.em_width
+                        - layout.space_invisible.width)
+                        .max(Pixels::ZERO)
+                        / 2.0)
+                        .into();
+                    (
+                        *line_offset,
+                        line_offset + 1,
+                        &layout.space_invisible,
+                        Pixels::from(
+                            x_offset + invisible_offset
+                                - layout.position_map.scroll_pixel_position.x,
+                        ),
+                    )
+                }
+                Invisible::CarriageReturn { line_offset } => {
+                    let x_offset: ScrollPixelOffset = self.x_for_index(*line_offset).into();
+                    (
+                        *line_offset,
+                        *line_offset,
+                        &layout.carriage_return_invisible,
+                        Pixels::from(x_offset - layout.position_map.scroll_pixel_position.x)
+                            - layout.carriage_return_invisible.width,
+                    )
+                }
+                Invisible::EndOfLine { line_offset } => {
+                    let x_offset: ScrollPixelOffset = self.x_for_index(*line_offset).into();
+                    (
+                        *line_offset,
+                        *line_offset,
+                        &layout.end_of_line_invisible,
+                        Pixels::from(x_offset - layout.position_map.scroll_pixel_position.x),
+                    )
                 }
             };
 
-            let x_offset: ScrollPixelOffset = self.x_for_index(token_offset).into();
-            let invisible_offset: ScrollPixelOffset =
-                ((layout.position_map.em_width - invisible_symbol.width).max(Pixels::ZERO) / 2.0)
-                    .into();
-            let origin = content_origin
-                + gpui::point(
-                    Pixels::from(
-                        x_offset + invisible_offset - layout.position_map.scroll_pixel_position.x,
-                    ),
-                    line_y,
-                );
+            let origin = content_origin + gpui::point(origin_x, line_y);
 
             (
                 [token_offset, token_end_offset],
@@ -9298,7 +9460,15 @@ impl LineWithInvisibles {
 
             ShowWhitespaceSetting::Trailing => {
                 let mut previous_start = self.len;
-                for ([start, end], paint) in invisible_iter.rev() {
+                for (([start, end], paint), invisible) in
+                    invisible_iter.rev().zip(self.invisibles.iter().rev())
+                {
+                    if !matches!(
+                        invisible,
+                        Invisible::Tab { .. } | Invisible::Whitespace { .. }
+                    ) {
+                        continue;
+                    }
                     if previous_start != end {
                         break;
                     }
@@ -9321,11 +9491,21 @@ impl LineWithInvisibles {
                 {
                     let should_render = match (&last_seen, invisible) {
                         (_, Invisible::Tab { .. }) => true,
-                        (Some((_, last_end, _)), _) => *last_end == start,
-                        _ => false,
+                        (Some((_, last_end, _)), Invisible::Whitespace { .. }) => {
+                            *last_end == start
+                        }
+                        (_, Invisible::Whitespace { .. }) => false,
+                        (_, Invisible::CarriageReturn { .. } | Invisible::EndOfLine { .. }) => {
+                            false
+                        }
                     };
 
-                    if should_render || start == 0 || end == self.len {
+                    let at_edge = matches!(
+                        invisible,
+                        Invisible::Tab { .. } | Invisible::Whitespace { .. }
+                    ) && (start == 0 || end == self.len);
+
+                    if should_render || at_edge {
                         paint(window, cx);
 
                         // Since we are scanning from the left, we will skip over the first available whitespace that is part
@@ -9458,6 +9638,12 @@ enum Invisible {
         line_end_offset: usize,
     },
     Whitespace {
+        line_offset: usize,
+    },
+    EndOfLine {
+        line_offset: usize,
+    },
+    CarriageReturn {
         line_offset: usize,
     },
 }
@@ -10925,33 +11111,27 @@ impl Element for EditorElement {
                         .language_settings(cx)
                         .whitespace_map;
 
-                    let tab_char = whitespace_map.tab.clone();
-                    let tab_len = tab_char.len();
-                    let tab_invisible = window.text_system().shape_line(
-                        tab_char,
-                        invisible_symbol_font_size,
-                        &[TextRun {
-                            len: tab_len,
-                            font: self.style.text.font(),
-                            color: cx.theme().colors().editor_invisible,
-                            ..Default::default()
-                        }],
-                        None,
-                    );
+                    let shape_invisible_symbol = |symbol: SharedString| {
+                        let len = symbol.len();
+                        window.text_system().shape_line(
+                            symbol,
+                            invisible_symbol_font_size,
+                            &[TextRun {
+                                len,
+                                font: self.style.text.font(),
+                                color: cx.theme().colors().editor_invisible,
+                                ..Default::default()
+                            }],
+                            None,
+                        )
+                    };
 
-                    let space_char = whitespace_map.space.clone();
-                    let space_len = space_char.len();
-                    let space_invisible = window.text_system().shape_line(
-                        space_char,
-                        invisible_symbol_font_size,
-                        &[TextRun {
-                            len: space_len,
-                            font: self.style.text.font(),
-                            color: cx.theme().colors().editor_invisible,
-                            ..Default::default()
-                        }],
-                        None,
-                    );
+                    let tab_invisible = shape_invisible_symbol(whitespace_map.tab.clone());
+                    let space_invisible = shape_invisible_symbol(whitespace_map.space.clone());
+                    let end_of_line_invisible =
+                        shape_invisible_symbol(whitespace_map.end_of_line.clone());
+                    let carriage_return_invisible =
+                        shape_invisible_symbol(whitespace_map.carriage_return.clone());
 
                     let mode = snapshot.mode.clone();
 
@@ -11075,6 +11255,8 @@ impl Element for EditorElement {
                         crease_trailers,
                         tab_invisible,
                         space_invisible,
+                        end_of_line_invisible,
+                        carriage_return_invisible,
                         sticky_buffer_header,
                         sticky_headers,
                         expand_toggles,
@@ -11266,6 +11448,8 @@ pub struct EditorLayout {
     mouse_context_menu: Option<AnyElement>,
     tab_invisible: ShapedLine,
     space_invisible: ShapedLine,
+    end_of_line_invisible: ShapedLine,
+    carriage_return_invisible: ShapedLine,
     sticky_buffer_header: Option<AnyElement>,
     sticky_headers: Option<StickyHeaders>,
     document_colors: Option<(DocumentColorsRenderMode, Vec<(Range<DisplayPoint>, Hsla)>)>,
@@ -11985,6 +12169,37 @@ pub(crate) struct BlockLayout {
     pub(crate) is_buffer_header: bool,
 }
 
+fn line_ending_for_display_row(
+    snapshot: &EditorSnapshot,
+    display_row: DisplayRow,
+) -> Option<LineEnding> {
+    if display_row >= snapshot.max_point().row() {
+        return None;
+    }
+
+    let buffer_snapshot = snapshot.buffer_snapshot();
+    let current_buffer_row =
+        MultiBufferRow(DisplayPoint::new(display_row, 0).to_point(snapshot).row);
+    let (current_buffer, current_range) =
+        buffer_snapshot.buffer_line_for_row(current_buffer_row)?;
+
+    let next_display_row = display_row.next_row();
+    let next_buffer_row = MultiBufferRow(
+        DisplayPoint::new(next_display_row, 0)
+            .to_point(snapshot)
+            .row,
+    );
+    let (next_buffer, next_range) = buffer_snapshot.buffer_line_for_row(next_buffer_row)?;
+
+    if current_buffer.remote_id() == next_buffer.remote_id()
+        && current_range.start.row == next_range.start.row
+    {
+        return None;
+    }
+
+    Some(current_buffer.line_ending())
+}
+
 pub fn layout_line(
     row: DisplayRow,
     snapshot: &EditorSnapshot,
@@ -12005,6 +12220,7 @@ pub fn layout_line(
         &snapshot.mode,
         text_width,
         is_row_soft_wrapped,
+        |row_offset| line_ending_for_display_row(snapshot, row + DisplayRow(row_offset as u32)),
         &[],
         window,
         cx,
@@ -13033,6 +13249,43 @@ mod tests {
             );
 
             assert_eq!(expected_invisibles, actual_invisibles);
+        }
+    }
+
+    #[gpui::test]
+    fn test_line_ending_invisibles_drawing(cx: &mut TestAppContext) {
+        init_test(cx, |settings| {
+            settings.defaults.show_whitespaces = Some(ShowWhitespaceSetting::All);
+            settings.defaults.tab_size = NonZeroU32::new(4);
+        });
+
+        for show_line_numbers in [true, false] {
+            let unix_invisibles = collect_invisibles_from_new_editor(
+                cx,
+                EditorMode::full(),
+                "a\nb",
+                px(500.0),
+                show_line_numbers,
+            );
+            assert_eq!(
+                vec![Invisible::EndOfLine { line_offset: 1 }],
+                unix_invisibles
+            );
+
+            let windows_invisibles = collect_invisibles_from_new_editor(
+                cx,
+                EditorMode::full(),
+                "a\r\nb",
+                px(500.0),
+                show_line_numbers,
+            );
+            assert_eq!(
+                vec![
+                    Invisible::CarriageReturn { line_offset: 1 },
+                    Invisible::EndOfLine { line_offset: 1 },
+                ],
+                windows_invisibles
+            );
         }
     }
 

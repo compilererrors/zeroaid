@@ -78,14 +78,11 @@ fn wait_for_running_subagent(thread: &Entity<Thread>, cx: &mut TestAppContext) -
     panic!("subagent thread should be running");
 }
 
-fn wait_for_no_running_subagents(
-    thread: &Entity<Thread>,
-    cx: &mut TestAppContext,
-    message: &str,
-) {
+fn wait_for_no_running_subagents(thread: &Entity<Thread>, cx: &mut TestAppContext, message: &str) {
     for _ in 0..10 {
         cx.run_until_parked();
-        let is_empty = thread.read_with(cx, |thread, cx| thread.running_subagent_ids(cx).is_empty());
+        let is_empty =
+            thread.read_with(cx, |thread, cx| thread.running_subagent_ids(cx).is_empty());
         if is_empty {
             return;
         }
@@ -4940,7 +4937,10 @@ async fn test_subagent_tool_resume_session(cx: &mut TestAppContext) {
     model.end_last_completion_stream();
 
     let resumed_session_id = wait_for_running_subagent(&thread, cx);
-    assert_eq!(resumed_session_id, subagent_session_id, "should be same session");
+    assert_eq!(
+        resumed_session_id, subagent_session_id,
+        "should be same session"
+    );
 
     // Subagent responds to follow-up
     model.send_last_completion_stream_text_chunk("follow-up task response");
@@ -5266,7 +5266,11 @@ async fn test_subagent_context_window_warning(cx: &mut TestAppContext) {
         },
     ));
 
-    wait_for_no_running_subagents(&thread, cx, "subagent should be stopped after context window warning");
+    wait_for_no_running_subagents(
+        &thread,
+        cx,
+        "subagent should be stopped after context window warning",
+    );
 
     // The parent model should get a new completion request to respond to the tool error
     model.send_last_completion_stream_text_chunk("Response after warning");
@@ -5383,7 +5387,11 @@ async fn test_subagent_no_context_window_warning_when_already_at_warning(cx: &mu
         },
     ));
 
-    wait_for_no_running_subagents(&thread, cx, "subagent should be stopped after context window warning");
+    wait_for_no_running_subagents(
+        &thread,
+        cx,
+        "subagent should be stopped after context window warning",
+    );
 
     // Parent model responds to complete first turn
     model.send_last_completion_stream_text_chunk("First response");

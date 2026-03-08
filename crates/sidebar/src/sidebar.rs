@@ -422,12 +422,7 @@ impl PickerDelegate for WorkspacePickerDelegate {
         self.selected_index = ix;
     }
 
-    fn can_select(
-        &self,
-        ix: usize,
-        _window: &mut Window,
-        _cx: &mut Context<Picker<Self>>,
-    ) -> bool {
+    fn can_select(&self, ix: usize, _window: &mut Window, _cx: &mut Context<Picker<Self>>) -> bool {
         match self.matches.get(ix) {
             Some(SidebarMatch {
                 entry: SidebarEntry::Separator(_),
@@ -644,24 +639,23 @@ impl PickerDelegate for WorkspacePickerDelegate {
                     ("workspace-item", thread_entry.index),
                     thread_subtitle.unwrap_or("New Thread".into()),
                 )
-                    .icon(
-                        thread_info
-                            .as_ref()
-                            .map_or(IconName::ZedAgent, |info| info.icon),
-                    )
-                    .notified(has_notification)
-                    .status(status)
-                    .selected(selected)
-                    .worktree(worktree_label.clone())
-                    .worktree_highlight_positions(positions.clone());
+                .icon(
+                    thread_info
+                        .as_ref()
+                        .map_or(IconName::ZedAgent, |info| info.icon),
+                )
+                .notified(has_notification)
+                .status(status)
+                .selected(selected)
+                .worktree(worktree_label.clone())
+                .worktree_highlight_positions(positions.clone());
                 let item = if workspace_count > 1 {
                     item.action_slot(remove_btn)
                 } else {
                     item
                 };
-                let item = item
-                    .hovered(is_hovered)
-                    .on_hover(cx.listener(move |picker, is_hovered, _window, cx| {
+                let item = item.hovered(is_hovered).on_hover(cx.listener(
+                    move |picker, is_hovered, _window, cx| {
                         let mut changed = false;
                         if *is_hovered {
                             if picker.delegate.hovered_thread_item != Some(workspace_index) {
@@ -675,7 +669,8 @@ impl PickerDelegate for WorkspacePickerDelegate {
                         if changed {
                             cx.notify();
                         }
-                    }));
+                    },
+                ));
                 let item = if !full_path.is_empty() {
                     item.tooltip(move |_, cx| {
                         Tooltip::with_meta(worktree_label.clone(), None, full_path.clone(), cx)

@@ -530,6 +530,7 @@ impl VsCodeSettings {
                 }),
                 ..Default::default()
             }),
+            control_character_style: None,
             debuggers: None,
             edit_predictions_disabled_in: None,
             enable_language_server: None,

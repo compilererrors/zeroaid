@@ -97,7 +97,10 @@ use gpui::{
     App, Context, Entity, EntityId, Font, HighlightStyle, LineLayout, Pixels, UnderlineStyle,
     WeakEntity,
 };
-use language::{Point, Subscription as BufferSubscription, language_settings::language_settings};
+use language::{
+    Point, Subscription as BufferSubscription,
+    language_settings::{ControlCharacterStyle, language_settings},
+};
 use multi_buffer::{
     Anchor, AnchorRangeExt, ExcerptId, MultiBuffer, MultiBufferOffset, MultiBufferOffsetUtf16,
     MultiBufferPoint, MultiBufferRow, MultiBufferSnapshot, RowInfo, ToOffset, ToPoint,
@@ -740,6 +743,11 @@ impl DisplayMap {
             companion_display_snapshot,
             block_snapshot,
             diagnostics_max_severity: self.diagnostics_max_severity,
+            control_character_style: self
+                .buffer
+                .read(cx)
+                .language_settings(cx)
+                .control_character_style,
             crease_snapshot: self.crease_map.snapshot(),
             text_highlights: self.text_highlights.clone(),
             inlay_highlights: self.inlay_highlights.clone(),
@@ -764,6 +772,11 @@ impl DisplayMap {
             companion_display_snapshot: None,
             block_snapshot,
             diagnostics_max_severity: self.diagnostics_max_severity,
+            control_character_style: self
+                .buffer
+                .read(cx)
+                .language_settings(cx)
+                .control_character_style,
             crease_snapshot: self.crease_map.snapshot(),
             text_highlights: self.text_highlights.clone(),
             inlay_highlights: self.inlay_highlights.clone(),
@@ -1493,6 +1506,7 @@ pub struct HighlightedChunk<'a> {
     pub is_tab: bool,
     pub is_inlay: bool,
     pub replacement: Option<ChunkReplacement>,
+    pub newlines: u128,
 }
 
 impl<'a> HighlightedChunk<'a> {
@@ -1500,6 +1514,7 @@ impl<'a> HighlightedChunk<'a> {
     fn highlight_invisibles(
         self,
         editor_style: &'a EditorStyle,
+        control_character_style: ControlCharacterStyle,
     ) -> impl Iterator<Item = Self> + 'a {
         let mut chunks = self.text.graphemes(true).peekable();
         let mut text = self.text;
@@ -1507,6 +1522,7 @@ impl<'a> HighlightedChunk<'a> {
         let is_tab = self.is_tab;
         let renderer = self.replacement;
         let is_inlay = self.is_inlay;
+        let mut newlines = self.newlines;
         iter::from_fn(move || {
             let mut prefix_len = 0;
             while let Some(&chunk) = chunks.peek() {
@@ -1519,6 +1535,9 @@ impl<'a> HighlightedChunk<'a> {
                 }
                 if prefix_len > 0 {
                     let (prefix, suffix) = text.split_at(prefix_len);
+                    let mask = 1u128.unbounded_shl(prefix_len as u32).wrapping_sub(1);
+                    let prefix_newlines = newlines & mask;
+                    newlines = newlines.unbounded_shr(prefix_len as u32);
                     text = suffix;
                     return Some(HighlightedChunk {
                         text: prefix,
@@ -1526,12 +1545,17 @@ impl<'a> HighlightedChunk<'a> {
                         is_tab,
                         is_inlay,
                         replacement: renderer.clone(),
+                        newlines: prefix_newlines,
                     });
                 }
                 chunks.next();
                 let (prefix, suffix) = text.split_at(chunk.len());
+                let char_len = chunk.len();
+                let mask = 1u128.unbounded_shl(char_len as u32).wrapping_sub(1);
+                let prefix_newlines = newlines & mask;
+                newlines = newlines.unbounded_shr(char_len as u32);
                 text = suffix;
-                if let Some(replacement) = replacement(ch) {
+                if let Some(replacement) = replacement(ch, control_character_style) {
                     let invisible_highlight = HighlightStyle {
                         background_color: Some(editor_style.status.hint_background),
                         underline: Some(UnderlineStyle {
@@ -1552,6 +1576,7 @@ impl<'a> HighlightedChunk<'a> {
                         is_tab: false,
                         is_inlay,
                         replacement: Some(ChunkReplacement::Str(replacement.into())),
+                        newlines: prefix_newlines,
                     });
                 } else {
                     let invisible_highlight = HighlightStyle {
@@ -1575,6 +1600,7 @@ impl<'a> HighlightedChunk<'a> {
                         is_tab: false,
                         is_inlay,
                         replacement: renderer.clone(),
+                        newlines: prefix_newlines,
                     });
                 }
             }
@@ -1588,6 +1614,7 @@ impl<'a> HighlightedChunk<'a> {
                     is_tab,
                     is_inlay,
                     replacement: renderer.clone(),
+                    newlines,
                 })
             } else {
                 None
@@ -1608,6 +1635,7 @@ pub struct DisplaySnapshot {
     clip_at_line_ends: bool,
     masked: bool,
     diagnostics_max_severity: DiagnosticSeverity,
+    control_character_style: ControlCharacterStyle,
     pub(crate) fold_placeholder: FoldPlaceholder,
     /// When true, LSP folding ranges are used via the crease map and the
     /// indent-based fallback in `crease_for_buffer_row` is skipped.
@@ -1967,8 +1995,9 @@ impl DisplaySnapshot {
                 is_tab: chunk.is_tab,
                 is_inlay: chunk.is_inlay,
                 replacement: chunk.renderer.map(ChunkReplacement::Renderer),
+                newlines: chunk.newlines,
             }
-            .highlight_invisibles(editor_style)
+            .highlight_invisibles(editor_style, self.control_character_style)
         })
     }
 
@@ -2150,7 +2179,10 @@ impl DisplaySnapshot {
             });
         chars.collect::<String>().graphemes(true).next().map(|s| {
             if let Some(invisible) = s.chars().next().filter(|&c| is_invisible(c)) {
-                replacement(invisible).unwrap_or(s).to_owned().into()
+                replacement(invisible, self.control_character_style)
+                    .unwrap_or(s)
+                    .to_owned()
+                    .into()
             } else if s == "\n" {
                 " ".into()
             } else {
@@ -4144,10 +4176,11 @@ pub mod tests {
             is_tab: false,
             is_inlay: false,
             replacement: None,
+            newlines: 0,
         };
 
         let chunks: Vec<_> = chunk
-            .highlight_invisibles(&editor_style)
+            .highlight_invisibles(&editor_style, ControlCharacterStyle::UnicodeControlPictures)
             .map(|chunk| chunk.text.to_string())
             .collect();
 

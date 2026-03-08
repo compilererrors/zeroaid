@@ -535,7 +535,7 @@ async fn test_inverted_diff_hunks_in_range(cx: &mut TestAppContext) {
     });
 
     multibuffer.update(cx, |multibuffer, cx| {
-        multibuffer.add_inverted_diff(diff, cx);
+        multibuffer.add_inverted_diff(diff, buffer.clone(), cx);
     });
 
     assert_new_snapshot(
@@ -3223,7 +3223,11 @@ async fn test_random_multibuffer(cx: &mut TestAppContext, mut rng: StdRng) {
                     if multibuffer.diff_for(excerpt_buffer_id).is_none() {
                         if inverted_main_buffer.is_some() {
                             reference.add_inverted_diff(diff.clone(), cx);
-                            multibuffer.add_inverted_diff(diff, cx);
+                            multibuffer.add_inverted_diff(
+                                diff,
+                                inverted_main_buffer.clone().unwrap(),
+                                cx,
+                            );
                         } else {
                             reference.add_diff(diff.clone(), cx);
                             multibuffer.add_diff(diff, cx);
@@ -4015,7 +4019,7 @@ async fn test_singleton_with_inverted_diff(cx: &mut TestAppContext) {
     let multibuffer = cx.new(|cx| {
         let mut multibuffer = MultiBuffer::singleton(base_text_buffer.clone(), cx);
         multibuffer.set_all_diff_hunks_expanded(cx);
-        multibuffer.add_inverted_diff(diff.clone(), cx);
+        multibuffer.add_inverted_diff(diff.clone(), buffer.clone(), cx);
         multibuffer
     });
 
@@ -4166,7 +4170,7 @@ async fn test_inverted_diff_base_text_change(cx: &mut TestAppContext) {
     let multibuffer = cx.new(|cx| {
         let mut multibuffer = MultiBuffer::singleton(base_text_buffer.clone(), cx);
         multibuffer.set_all_diff_hunks_expanded(cx);
-        multibuffer.add_inverted_diff(diff.clone(), cx);
+        multibuffer.add_inverted_diff(diff.clone(), buffer.clone(), cx);
         multibuffer
     });
 

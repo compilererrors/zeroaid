@@ -92,10 +92,12 @@ use util::rel_path::RelPath;
 use util::{ResultExt, asset_str, maybe};
 use uuid::Uuid;
 use vim_mode_setting::VimModeSetting;
-use workspace::notifications::{NotificationId, dismiss_app_notification, show_app_notification};
 #[cfg(feature = "audio")]
 use workspace::notifications::SuppressEvent;
+use workspace::notifications::{NotificationId, dismiss_app_notification, show_app_notification};
 
+#[cfg(feature = "audio")]
+use workspace::NotificationFrame;
 #[cfg(feature = "ai")]
 use workspace::Panel;
 use workspace::{
@@ -103,8 +105,6 @@ use workspace::{
     create_and_open_local_file, notifications::simple_message_notification::MessageNotification,
     open_new,
 };
-#[cfg(feature = "audio")]
-use workspace::NotificationFrame;
 use workspace::{
     CloseIntent, CloseProject, CloseWindow, RestoreBanner, with_active_or_new_workspace,
 };

@@ -419,7 +419,14 @@
   "whitespace_map": {
     "space": "•",
     "tab": "→",
+    "eol": "¬",
+    "cr": "¤",
   },
+  // How ASCII control characters should be rendered when they appear in the editor.
+  // Available values:
+  // - "unicode_control_pictures", which renders symbols like "␏"
+  // - "caret_notation", which renders TextMate-style sequences like "^O"
+  "control_character_style": "unicode_control_pictures",
   // Settings related to calls in Zed
   "calls": {
     // Join calls with the microphone live by default

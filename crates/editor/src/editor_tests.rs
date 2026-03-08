@@ -28,6 +28,7 @@ use language::{
     LanguageConfigOverride, LanguageMatcher, LanguageName, Override, Point,
     language_settings::{
         CompletionSettingsContent, FormatterList, LanguageSettingsContent, LspInsertMode,
+        ShowWhitespaceSetting,
     },
     tree_sitter_python,
 };
@@ -1320,6 +1321,56 @@ fn test_fold_action_multiple_line_breaks(cx: &mut TestAppContext) {
             editor.display_text(cx),
             editor.buffer.read(cx).read(cx).text()
         );
+    });
+}
+
+#[gpui::test]
+fn test_toggle_whitespaces_persists_through_settings_updates(cx: &mut TestAppContext) {
+    init_test(cx, |settings| {
+        settings.defaults.show_whitespaces = Some(ShowWhitespaceSetting::Selection);
+    });
+
+    let editor = cx.add_window(|window, cx| {
+        let buffer = MultiBuffer::build_simple("one two", cx);
+        build_editor(buffer, window, cx)
+    });
+
+    _ = editor.update(cx, |editor, window, cx| {
+        assert_eq!(
+            editor.whitespace_setting(cx),
+            ShowWhitespaceSetting::Selection
+        );
+        assert!(!editor.all_whitespaces_shown(cx));
+
+        editor.toggle_whitespaces(&ToggleWhitespaces, window, cx);
+        assert_eq!(editor.whitespace_setting(cx), ShowWhitespaceSetting::All);
+        assert!(editor.all_whitespaces_shown(cx));
+        assert_eq!(editor.show_whitespaces, Some(ShowWhitespaceSetting::All));
+    });
+
+    update_test_language_settings(cx, &|settings| {
+        settings.defaults.show_whitespaces = Some(ShowWhitespaceSetting::All);
+    });
+
+    _ = editor.update(cx, |editor, window, cx| {
+        assert_eq!(editor.show_whitespaces, None);
+        assert_eq!(editor.whitespace_setting(cx), ShowWhitespaceSetting::All);
+        assert!(editor.all_whitespaces_shown(cx));
+
+        editor.toggle_whitespaces(&ToggleWhitespaces, window, cx);
+        assert_eq!(editor.whitespace_setting(cx), ShowWhitespaceSetting::None);
+        assert!(!editor.all_whitespaces_shown(cx));
+        assert_eq!(editor.show_whitespaces, Some(ShowWhitespaceSetting::None));
+    });
+
+    update_test_language_settings(cx, &|settings| {
+        settings.defaults.show_whitespaces = Some(ShowWhitespaceSetting::None);
+    });
+
+    _ = editor.update(cx, |editor, _, cx| {
+        assert_eq!(editor.show_whitespaces, None);
+        assert_eq!(editor.whitespace_setting(cx), ShowWhitespaceSetting::None);
+        assert!(!editor.all_whitespaces_shown(cx));
     });
 }
 

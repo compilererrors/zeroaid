@@ -136,8 +136,8 @@ use language::{
     OutlineItem, Point, Runnable, Selection, SelectionGoal, TextObject, TransactionId,
     TreeSitterOptions, WordsQuery,
     language_settings::{
-        self, LanguageSettings, LspInsertMode, RewrapBehavior, WordsCompletionMode,
-        all_language_settings, language_settings,
+        self, LanguageSettings, LspInsertMode, RewrapBehavior, ShowWhitespaceSetting,
+        WordsCompletionMode, all_language_settings, language_settings,
     },
     point_from_lsp, point_to_lsp, text_diff_with_options,
 };
@@ -1193,6 +1193,7 @@ pub struct Editor {
     show_diff_review_button: bool,
     show_wrap_guides: Option<bool>,
     show_indent_guides: Option<bool>,
+    show_whitespaces: Option<ShowWhitespaceSetting>,
     buffers_with_disabled_indent_guides: HashSet<BufferId>,
     highlight_order: usize,
     highlighted_rows: HashMap<TypeId, Vec<RowHighlight>>,
@@ -2432,6 +2433,7 @@ impl Editor {
             show_diff_review_button: false,
             show_wrap_guides: None,
             show_indent_guides,
+            show_whitespaces: None,
             buffers_with_disabled_indent_guides: HashSet::default(),
             highlight_order: 0,
             highlighted_rows: HashMap::default(),
@@ -21343,6 +21345,37 @@ impl Editor {
         self.show_indent_guides
     }
 
+    pub fn toggle_whitespaces(
+        &mut self,
+        _: &ToggleWhitespaces,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let show_whitespaces = if self.all_whitespaces_shown(cx) {
+            ShowWhitespaceSetting::None
+        } else {
+            ShowWhitespaceSetting::All
+        };
+        self.show_whitespaces = Some(show_whitespaces);
+        cx.notify();
+
+        if let Some(project) = self.project() {
+            let fs = project.read(cx).fs().clone();
+            update_settings_file(fs, cx, move |settings, _| {
+                settings.project.all_languages.defaults.show_whitespaces = Some(show_whitespaces);
+            });
+        }
+    }
+
+    pub fn whitespace_setting(&self, cx: &App) -> ShowWhitespaceSetting {
+        self.show_whitespaces
+            .unwrap_or_else(|| self.buffer.read(cx).language_settings(cx).show_whitespaces)
+    }
+
+    pub fn all_whitespaces_shown(&self, cx: &App) -> bool {
+        self.whitespace_setting(cx) == ShowWhitespaceSetting::All
+    }
+
     pub fn disable_indent_guides_for_buffer(
         &mut self,
         buffer_id: BufferId,
@@ -24343,6 +24376,12 @@ impl Editor {
         let new_language_settings = self.fetch_applicable_language_settings(cx);
         let language_settings_changed = new_language_settings != self.applicable_language_settings;
         self.applicable_language_settings = new_language_settings;
+
+        if self.show_whitespaces
+            == Some(self.buffer.read(cx).language_settings(cx).show_whitespaces)
+        {
+            self.show_whitespaces = None;
+        }
 
         let new_accents = self.fetch_accent_data(cx);
         let accents_changed = new_accents != self.accent_data;

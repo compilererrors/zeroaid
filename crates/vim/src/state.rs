@@ -17,7 +17,9 @@ use gpui::{
     Action, App, AppContext, BorrowAppContext, ClipboardEntry, ClipboardItem, DismissEvent, Entity,
     EntityId, Global, HighlightStyle, StyledText, Subscription, Task, TextStyle, WeakEntity,
 };
-use language::{Buffer, BufferEvent, BufferId, Chunk, Point};
+use language::{
+    Buffer, BufferEvent, BufferId, Chunk, Point, language_settings::AllLanguageSettings,
+};
 use multi_buffer::MultiBufferRow;
 use picker::{Picker, PickerDelegate};
 use project::{Project, ProjectItem, ProjectPath};
@@ -1245,6 +1247,9 @@ impl PickerDelegate for RegistersViewDelegate {
         output.push(' ');
         output.push(' ');
         let mut base = output.len();
+        let control_character_style = AllLanguageSettings::get_global(cx)
+            .defaults
+            .control_character_style;
         for (ix, c) in register_match.contents.char_indices() {
             if ix > 100 {
                 break;
@@ -1255,7 +1260,7 @@ impl PickerDelegate for RegistersViewDelegate {
                 '\r' => Some("\\r".to_string()),
                 c if is_invisible(c) => {
                     if c <= '\x1f' {
-                        replacement(c).map(|s| s.to_string())
+                        replacement(c, control_character_style).map(|s| s.to_string())
                     } else {
                         Some(format!("\\u{:04X}", c as u32))
                     }

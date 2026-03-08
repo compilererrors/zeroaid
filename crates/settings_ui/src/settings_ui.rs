@@ -46,12 +46,12 @@ use workspace::{
 };
 use zed_actions::{OpenProjectSettings, OpenSettings, OpenSettingsAt};
 
+#[cfg(feature = "ai")]
+use crate::components::render_ollama_model_picker;
 use crate::components::{
     EnumVariantDropdown, NumberField, NumberFieldMode, NumberFieldType, SettingsInputField,
     SettingsSectionHeader, font_picker, icon_theme_picker, theme_picker,
 };
-#[cfg(feature = "ai")]
-use crate::components::render_ollama_model_picker;
 #[cfg(feature = "collab")]
 use crate::pages::{render_input_audio_device_dropdown, render_output_audio_device_dropdown};
 
@@ -460,6 +460,7 @@ fn init_renderers(cx: &mut App) {
             },
         )
         .add_basic_renderer::<bool>(render_toggle_button)
+        .add_basic_renderer::<char>(render_character_field)
         .add_basic_renderer::<String>(render_text_field)
         .add_basic_renderer::<SharedString>(render_text_field)
         .add_basic_renderer::<settings::SaturatingBool>(render_toggle_button)
@@ -474,6 +475,7 @@ fn init_renderers(cx: &mut App) {
         .add_basic_renderer::<settings::MultiCursorModifier>(render_dropdown)
         .add_basic_renderer::<settings::HideMouseMode>(render_dropdown)
         .add_basic_renderer::<settings::CurrentLineHighlight>(render_dropdown)
+        .add_basic_renderer::<settings::ControlCharacterStyle>(render_dropdown)
         .add_basic_renderer::<settings::ShowWhitespaceSetting>(render_dropdown)
         .add_basic_renderer::<settings::SoftWrap>(render_dropdown)
         .add_basic_renderer::<settings::AutoIndentMode>(render_dropdown)
@@ -4039,6 +4041,60 @@ fn render_text_field<T: From<String> + Into<String> + AsRef<str> + Clone>(
         .into_any_element()
 }
 
+fn parse_character_field_input(new_text: Option<String>) -> Option<Option<char>> {
+    match new_text {
+        None => Some(None),
+        Some(text) => {
+            let mut characters = text.chars();
+            let first_character = characters.next()?;
+            if characters.next().is_some() {
+                None
+            } else {
+                Some(Some(first_character))
+            }
+        }
+    }
+}
+
+fn render_character_field(
+    field: SettingField<char>,
+    file: SettingsUiFile,
+    metadata: Option<&SettingsFieldMetadata>,
+    _window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let (_, initial_character) =
+        SettingsStore::global(cx).get_value_from_file(file.to_settings(), field.pick);
+    let initial_text = initial_character.map(|character| character.to_string());
+
+    SettingsInputField::new()
+        .tab_index(0)
+        .when_some(initial_text, |editor, text| editor.with_initial_text(text))
+        .when_some(
+            metadata.and_then(|metadata| metadata.placeholder),
+            |editor, placeholder| editor.with_placeholder(placeholder),
+        )
+        .on_confirm({
+            move |new_text, window, cx| {
+                let Some(new_value) = parse_character_field_input(new_text) else {
+                    return;
+                };
+
+                update_settings_file(
+                    file.clone(),
+                    field.json_path,
+                    window,
+                    cx,
+                    move |settings, _cx| {
+                        (field.write)(settings, new_value);
+                    },
+                )
+                .log_err();
+            }
+        })
+        .into_any_element()
+}
+
 fn render_toggle_button<B: Into<bool> + From<bool> + Copy>(
     field: SettingField<B>,
     file: SettingsUiFile,
@@ -4355,6 +4411,17 @@ fn render_icon_theme_picker(
 pub mod test {
 
     use super::*;
+
+    #[test]
+    fn test_parse_character_field_input() {
+        assert_eq!(parse_character_field_input(None), Some(None));
+        assert_eq!(
+            parse_character_field_input(Some("•".to_string())),
+            Some(Some('•'))
+        );
+        assert_eq!(parse_character_field_input(Some(String::new())), None);
+        assert_eq!(parse_character_field_input(Some("ab".to_string())), None);
+    }
 
     impl SettingsWindow {
         fn navbar_entry(&self) -> usize {

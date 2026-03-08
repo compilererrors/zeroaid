@@ -46,11 +46,20 @@ pub fn is_invisible(c: char) -> bool {
 // ASCII control characters have fancy unicode glyphs, everything else
 // is replaced by a space - unless it is used in combining characters in
 // which case we need to leave it in the string.
-pub fn replacement(c: char) -> Option<&'static str> {
+pub fn replacement(
+    c: char,
+    control_character_style: ControlCharacterStyle,
+) -> Option<&'static str> {
     if c <= '\x1f' {
-        Some(C0_SYMBOLS[c as usize])
+        Some(match control_character_style {
+            ControlCharacterStyle::UnicodeControlPictures => C0_SYMBOLS[c as usize],
+            ControlCharacterStyle::CaretNotation => CARET_NOTATION_SYMBOLS[c as usize],
+        })
     } else if c == '\x7f' {
-        Some(DEL)
+        Some(match control_character_style {
+            ControlCharacterStyle::UnicodeControlPictures => DEL,
+            ControlCharacterStyle::CaretNotation => CARET_NOTATION_DEL,
+        })
     } else if contains(c, PRESERVE) {
         None
     } else {
@@ -69,7 +78,13 @@ const C0_SYMBOLS: &[&str] = &[
     "␀", "␁", "␂", "␃", "␄", "␅", "␆", "␇", "␈", "␉", "␊", "␋", "␌", "␍", "␎", "␏", "␐", "␑", "␒",
     "␓", "␔", "␕", "␖", "␗", "␘", "␙", "␚", "␛", "␜", "␝", "␞", "␟",
 ];
+const CARET_NOTATION_SYMBOLS: &[&str] = &[
+    "^@", "^A", "^B", "^C", "^D", "^E", "^F", "^G", "^H", "^I", "^J", "^K", "^L", "^M", "^N", "^O",
+    "^P", "^Q", "^R", "^S", "^T", "^U", "^V", "^W", "^X", "^Y", "^Z", "^[", "^\\", "^]", "^^",
+    "^_",
+];
 const DEL: &str = "␡";
+const CARET_NOTATION_DEL: &str = "^?";
 
 // generated using ucd-generate: ucd-generate general-category --include Format --chars ucd-16.0.0
 pub const FORMAT: &[(char, char)] = &[
@@ -131,3 +146,33 @@ fn contains(c: char, list: &[(char, char)]) -> bool {
     }
     false
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_replacement_uses_unicode_control_pictures_by_default() {
+        assert_eq!(
+            replacement('\u{000f}', ControlCharacterStyle::UnicodeControlPictures),
+            Some("␏")
+        );
+        assert_eq!(
+            replacement('\u{007f}', ControlCharacterStyle::UnicodeControlPictures),
+            Some("␡")
+        );
+    }
+
+    #[test]
+    fn test_replacement_supports_caret_notation() {
+        assert_eq!(
+            replacement('\u{000f}', ControlCharacterStyle::CaretNotation),
+            Some("^O")
+        );
+        assert_eq!(
+            replacement('\u{007f}', ControlCharacterStyle::CaretNotation),
+            Some("^?")
+        );
+    }
+}
+use language::language_settings::ControlCharacterStyle;

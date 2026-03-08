@@ -4612,7 +4612,7 @@ mod tests {
                 0,
                 cx,
             );
-            mb.add_inverted_diff(diff.clone(), cx);
+            mb.add_inverted_diff(diff.clone(), rhs_buffer.clone(), cx);
             mb
         });
         let rhs_multibuffer = cx.new(|cx| {

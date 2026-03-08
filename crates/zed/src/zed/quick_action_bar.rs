@@ -6,7 +6,7 @@ use editor::actions::{
     AddSelectionAbove, AddSelectionBelow, CodeActionSource, DuplicateLineDown, GoToDiagnostic,
     GoToHunk, GoToPreviousDiagnostic, GoToPreviousHunk, MoveLineDown, MoveLineUp, SelectAll,
     SelectLargerSyntaxNode, SelectNext, SelectSmallerSyntaxNode, ToggleCodeActions,
-    ToggleDiagnostics, ToggleGoToLine, ToggleInlineDiagnostics,
+    ToggleDiagnostics, ToggleGoToLine, ToggleInlineDiagnostics, ToggleWhitespaces,
 };
 use editor::code_context_menus::{CodeContextMenu, ContextMenuOrigin};
 use editor::{Editor, EditorSettings};
@@ -118,6 +118,7 @@ impl Render for QuickActionBar {
         let inline_values_enabled = editor_value.inline_values_enabled();
         let semantic_highlights_enabled = editor_value.semantic_highlights_enabled();
         let is_full = editor_value.mode().is_full();
+        let all_whitespaces_shown = editor_value.all_whitespaces_shown(cx);
         let diagnostics_enabled = editor_value.diagnostics_max_severity != DiagnosticSeverity::Off;
         let supports_inline_diagnostics = editor_value.inline_diagnostics_enabled();
         let inline_diagnostics_enabled = editor_value.show_inline_diagnostics();
@@ -513,6 +514,27 @@ impl Render for QuickActionBar {
                                             .update(cx, |editor, cx| {
                                                 editor.toggle_line_numbers(
                                                     &editor::actions::ToggleLineNumbers,
+                                                    window,
+                                                    cx,
+                                                );
+                                            })
+                                            .ok();
+                                    }
+                                },
+                            );
+
+                            menu = menu.toggleable_entry(
+                                "Invisible Characters",
+                                all_whitespaces_shown,
+                                IconPosition::Start,
+                                Some(ToggleWhitespaces.boxed_clone()),
+                                {
+                                    let editor = editor.clone();
+                                    move |window, cx| {
+                                        editor
+                                            .update(cx, |editor, cx| {
+                                                editor.toggle_whitespaces(
+                                                    &ToggleWhitespaces,
                                                     window,
                                                     cx,
                                                 );

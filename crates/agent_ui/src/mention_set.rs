@@ -643,7 +643,6 @@ mod tests {
             "Unexpected error: {error:#}"
         );
     }
-
 }
 
 /// Inserts a list of images into the editor as context mentions.

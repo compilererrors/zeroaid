@@ -544,12 +544,16 @@ pub struct LanguageSettingsContent {
     ///
     /// Default: []
     pub edit_predictions_disabled_in: Option<Vec<String>>,
-    /// Whether to show tabs and spaces in the editor.
+    /// Whether to show tabs, spaces, and line endings in the editor.
     pub show_whitespaces: Option<ShowWhitespaceSetting>,
     /// Visible characters used to render whitespace when show_whitespaces is enabled.
     ///
-    /// Default: "•" for spaces, "→" for tabs.
+    /// Default: "•" for spaces, "→" for tabs, "¬" for line endings, "¤" for carriage returns.
     pub whitespace_map: Option<WhitespaceMapContent>,
+    /// How ASCII control characters should be rendered when they appear in the editor.
+    ///
+    /// Default: unicode_control_pictures
+    pub control_character_style: Option<ControlCharacterStyle>,
     /// Whether to start a new line with a comment when a previous line is a comment as well.
     ///
     /// Default: true
@@ -680,6 +684,30 @@ pub enum ShowWhitespaceSetting {
 pub struct WhitespaceMapContent {
     pub space: Option<char>,
     pub tab: Option<char>,
+    pub eol: Option<char>,
+    pub cr: Option<char>,
+}
+
+#[derive(
+    Debug,
+    PartialEq,
+    Clone,
+    Copy,
+    Default,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    MergeFrom,
+    strum::VariantArray,
+    strum::VariantNames,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ControlCharacterStyle {
+    /// Render ASCII control characters using Unicode control pictures such as "␏".
+    #[default]
+    UnicodeControlPictures,
+    /// Render ASCII control characters using caret notation such as "^O".
+    CaretNotation,
 }
 
 /// The behavior of `editor::Rewrap`.

@@ -40,12 +40,12 @@ use settings::WorktreeId;
 use std::sync::Arc;
 use theme::ActiveTheme;
 use title_bar_settings::TitleBarSettings;
+#[cfg(feature = "collab")]
+use ui::PopoverMenuHandle;
 use ui::{
     Avatar, ButtonLike, Chip, ContextMenu, IconWithIndicator, Indicator, PopoverMenu, TintColor,
     Tooltip, prelude::*, utils::platform_title_bar_height,
 };
-#[cfg(feature = "collab")]
-use ui::PopoverMenuHandle;
 use update_version::UpdateVersion;
 use util::ResultExt;
 use workspace::{

@@ -835,6 +835,8 @@ actions!(
         ToggleEditPrediction,
         /// Toggles line numbers display.
         ToggleLineNumbers,
+        /// Toggles showing all whitespace characters.
+        ToggleWhitespaces,
         /// Toggles the minimap display.
         ToggleMinimap,
         /// Swaps the start and end of the current selection.

@@ -12,10 +12,10 @@ use itertools::{Either, Itertools};
 use settings::{DocumentFoldingRanges, DocumentSymbols, IntoGpui, SemanticTokens};
 
 pub use settings::{
-    AutoIndentMode, CompletionSettingsContent, EditPredictionPromptFormat, EditPredictionProvider,
-    EditPredictionsMode, FormatOnSave, Formatter, FormatterList, InlayHintKind,
-    LanguageSettingsContent, LspInsertMode, RewrapBehavior, ShowWhitespaceSetting, SoftWrap,
-    WordsCompletionMode,
+    AutoIndentMode, CompletionSettingsContent, ControlCharacterStyle, EditPredictionPromptFormat,
+    EditPredictionProvider, EditPredictionsMode, FormatOnSave, Formatter, FormatterList,
+    InlayHintKind, LanguageSettingsContent, LspInsertMode, RewrapBehavior, ShowWhitespaceSetting,
+    SoftWrap, WordsCompletionMode,
 };
 use settings::{RegisterSetting, Settings, SettingsLocation, SettingsStore};
 use shellexpand;
@@ -60,6 +60,8 @@ pub struct AllLanguageSettings {
 pub struct WhitespaceMap {
     pub space: SharedString,
     pub tab: SharedString,
+    pub end_of_line: SharedString,
+    pub carriage_return: SharedString,
 }
 
 /// The settings for a particular language.
@@ -125,10 +127,12 @@ pub struct LanguageSettings {
     /// Controls whether edit predictions are shown in the given language
     /// scopes.
     pub edit_predictions_disabled_in: Vec<String>,
-    /// Whether to show tabs and spaces in the editor.
+    /// Whether to show tabs, spaces, and line endings in the editor.
     pub show_whitespaces: settings::ShowWhitespaceSetting,
     /// Visible characters used to render whitespace when show_whitespaces is enabled.
     pub whitespace_map: WhitespaceMap,
+    /// How ASCII control characters should be rendered when they appear in the editor.
+    pub control_character_style: settings::ControlCharacterStyle,
     /// Whether to start a new line with a comment when a previous line is a comment as well.
     pub extend_comment_on_newline: bool,
     /// Whether to continue markdown lists when pressing enter.
@@ -626,7 +630,10 @@ impl settings::Settings for AllLanguageSettings {
                 whitespace_map: WhitespaceMap {
                     space: SharedString::new(whitespace_map.space.unwrap().to_string()),
                     tab: SharedString::new(whitespace_map.tab.unwrap().to_string()),
+                    end_of_line: SharedString::new(whitespace_map.eol.unwrap().to_string()),
+                    carriage_return: SharedString::new(whitespace_map.cr.unwrap().to_string()),
                 },
+                control_character_style: settings.control_character_style.unwrap(),
                 extend_comment_on_newline: settings.extend_comment_on_newline.unwrap(),
                 extend_list_on_newline: settings.extend_list_on_newline.unwrap(),
                 indent_list_on_tab: settings.indent_list_on_tab.unwrap(),
