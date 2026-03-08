@@ -24,6 +24,7 @@ More areas may be trimmed over time if they are not needed for the core editor w
 - `collab` includes `audio` + `audio/webrtc`.
 - Collaboration/calls/audio settings pages are hidden when `collab` is not enabled.
 - Title bar initialization remains enabled so the top bar/UI does not disappear in lean builds.
+- Support to show invisible chars and control chars, editable through menu under `Whitespace`.
 
 ### Build Behavior (Important)
 
