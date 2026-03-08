@@ -433,16 +433,7 @@ pub fn initialize_workspace(
         if let Some(specs) = window.gpu_specs() {
             log::info!("Using GPU: {:?}", specs);
             show_software_emulation_warning_if_needed(specs.clone(), window, cx);
-            if let Some((crash_server, message)) = crashes::CRASH_HANDLER
-                .get()
-                .zip(bincode::serialize(&specs).ok())
-                && let Err(err) = crash_server.send_message(3, message)
-            {
-                log::warn!(
-                    "Failed to store active gpu info for crash reporting: {}",
-                    err
-                );
-            }
+            crashes::set_gpu_info(specs);
         }
 
         #[cfg(feature = "ai")]
@@ -511,7 +502,8 @@ pub fn initialize_workspace(
             status_bar.add_right_item(image_info, window, cx);
         });
 
-        initialize_panels(prompt_builder.clone(), window, cx);
+        let panels_task = initialize_panels(prompt_builder.clone(), window, cx);
+        workspace.set_panels_task(panels_task);
         register_actions(app_state.clone(), workspace, window, cx);
 
         workspace.focus_handle(cx).focus(window, cx);
@@ -635,7 +627,7 @@ fn initialize_panels(
     prompt_builder: Arc<PromptBuilder>,
     window: &mut Window,
     cx: &mut Context<Workspace>,
-) {
+) -> Task<anyhow::Result<()>> {
     #[cfg(not(feature = "ai"))]
     let _ = &prompt_builder;
 
@@ -725,7 +717,6 @@ fn initialize_panels(
 
         anyhow::Ok(())
     })
-    .detach();
 }
 
 #[cfg(feature = "ai")]
@@ -859,7 +850,7 @@ fn register_actions(
                 }
             }
         })
-        .register_action(|workspace, _: &workspace::Open, window, cx| {
+        .register_action(|workspace, action: &workspace::Open, window, cx| {
             telemetry::event!("Project Opened");
             workspace::prompt_for_open_path_and_open(
                 workspace,
@@ -870,6 +861,7 @@ fn register_actions(
                     multiple: true,
                     prompt: None,
                 },
+                action.create_new_window,
                 window,
                 cx,
             );
@@ -885,6 +877,7 @@ fn register_actions(
                     multiple: true,
                     prompt: None,
                 },
+                true,
                 window,
                 cx,
             );

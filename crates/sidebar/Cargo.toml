@@ -12,7 +12,7 @@ workspace = true
 path = "src/sidebar.rs"
 
 [features]
-default = ["ai"]
+default = []
 ai = ["dep:acp_thread", "dep:agent_ui"]
 test-support = []
 

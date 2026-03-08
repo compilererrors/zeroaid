@@ -181,8 +181,6 @@ members = [
     "crates/storybook",
     "crates/streaming_diff",
     "crates/sum_tree",
-    "crates/supermaven",
-    "crates/supermaven_api",
     "crates/svg_preview",
     "crates/system_specs",
     "crates/tab_switcher",
@@ -297,6 +295,7 @@ copilot = { path = "crates/copilot" }
 copilot_chat = { path = "crates/copilot_chat" }
 copilot_ui = { path = "crates/copilot_ui" }
 crashes = { path = "crates/crashes" }
+csv_preview = { path = "crates/csv_preview" }
 credentials_provider = { path = "crates/credentials_provider" }
 crossbeam = "0.8.4"
 dap = { path = "crates/dap" }
@@ -425,8 +424,6 @@ sqlez_macros = { path = "crates/sqlez_macros" }
 story = { path = "crates/story" }
 streaming_diff = { path = "crates/streaming_diff" }
 sum_tree = { path = "crates/sum_tree" }
-supermaven = { path = "crates/supermaven" }
-supermaven_api = { path = "crates/supermaven_api" }
 codestral = { path = "crates/codestral" }
 system_specs = { path = "crates/system_specs" }
 tab_switcher = { path = "crates/tab_switcher" }
@@ -584,7 +581,7 @@ lsp-types = { git = "https://github.com/zed-industries/lsp-types", rev = "a4f410
 mach2 = "0.5"
 markup5ever_rcdom = "0.3.0"
 metal = "0.33"
-minidumper = "0.8"
+minidumper = "0.9"
 moka = { version = "0.12.10", features = ["sync"] }
 naga = { version = "28.0", features = ["wgsl-in"] }
 nanoid = "0.4"
@@ -642,6 +639,8 @@ prost = "0.9"
 prost-build = "0.9"
 prost-types = "0.9"
 pollster = "0.4.0"
+proptest = { git = "https://github.com/proptest-rs/proptest", rev = "3dca198a8fef1b32e3a66f1e1897c955b4dc5b5b", features = ["attr-macro"] }
+proptest-derive = "0.8.0"
 pulldown-cmark = { version = "0.13.0", default-features = false }
 quote = "1.0.9"
 rand = "0.9"
@@ -892,7 +891,6 @@ sidebar = { codegen-units = 1 }
 snippet = { codegen-units = 1 }
 snippets_ui = { codegen-units = 1 }
 story = { codegen-units = 1 }
-supermaven_api = { codegen-units = 1 }
 telemetry_events = { codegen-units = 1 }
 theme_selector = { codegen-units = 1 }
 time_format = { codegen-units = 1 }

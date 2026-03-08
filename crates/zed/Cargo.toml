@@ -31,7 +31,6 @@ ai = [
     "dep:language_models",
     "sidebar/ai",
     "settings_ui/ai",
-    "dep:supermaven",
 ]
 collab = [
     "audio",
@@ -130,6 +129,7 @@ copilot = { workspace = true, optional = true }
 copilot_chat = { workspace = true, optional = true }
 copilot_ui = { workspace = true, optional = true }
 crashes.workspace = true
+csv_preview.workspace = true
 dap_adapters.workspace = true
 db.workspace = true
 debug_adapter_extension.workspace = true
@@ -225,7 +225,6 @@ sidebar = { path = "../sidebar", default-features = false }
 smol.workspace = true
 snippet_provider.workspace = true
 snippets_ui.workspace = true
-supermaven = { workspace = true, optional = true }
 svg_preview.workspace = true
 sysinfo.workspace = true
 tab_switcher.workspace = true

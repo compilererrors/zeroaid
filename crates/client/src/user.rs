@@ -136,6 +136,7 @@ pub enum Event {
     ShowContacts,
     ParticipantIndicesChanged,
     PrivateUserInfoUpdated,
+    OrganizationChanged,
     PlanUpdated,
 }
 

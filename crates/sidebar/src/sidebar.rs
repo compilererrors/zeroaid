@@ -423,7 +423,7 @@ impl PickerDelegate for WorkspacePickerDelegate {
     }
 
     fn can_select(
-        &mut self,
+        &self,
         ix: usize,
         _window: &mut Window,
         _cx: &mut Context<Picker<Self>>,
@@ -640,28 +640,26 @@ impl PickerDelegate for WorkspacePickerDelegate {
                 let status = thread_info
                     .as_ref()
                     .map_or(AgentThreadStatus::default(), |info| info.status);
-                let running = matches!(
-                    status,
-                    AgentThreadStatus::Running | AgentThreadStatus::WaitingForConfirmation
-                );
-
-                Some(
-                    ThreadItem::new(
-                        ("workspace-item", thread_entry.index),
-                        thread_subtitle.unwrap_or("New Thread".into()),
-                    )
+                let item = ThreadItem::new(
+                    ("workspace-item", thread_entry.index),
+                    thread_subtitle.unwrap_or("New Thread".into()),
+                )
                     .icon(
                         thread_info
                             .as_ref()
                             .map_or(IconName::ZedAgent, |info| info.icon),
                     )
-                    .running(running)
-                    .generation_done(has_notification)
+                    .notified(has_notification)
                     .status(status)
                     .selected(selected)
                     .worktree(worktree_label.clone())
-                    .worktree_highlight_positions(positions.clone())
-                    .when(workspace_count > 1, |item| item.action_slot(remove_btn))
+                    .worktree_highlight_positions(positions.clone());
+                let item = if workspace_count > 1 {
+                    item.action_slot(remove_btn)
+                } else {
+                    item
+                };
+                let item = item
                     .hovered(is_hovered)
                     .on_hover(cx.listener(move |picker, is_hovered, _window, cx| {
                         let mut changed = false;
@@ -677,14 +675,16 @@ impl PickerDelegate for WorkspacePickerDelegate {
                         if changed {
                             cx.notify();
                         }
-                    }))
-                    .when(!full_path.is_empty(), |this| {
-                        this.tooltip(move |_, cx| {
-                            Tooltip::with_meta(worktree_label.clone(), None, full_path.clone(), cx)
-                        })
+                    }));
+                let item = if !full_path.is_empty() {
+                    item.tooltip(move |_, cx| {
+                        Tooltip::with_meta(worktree_label.clone(), None, full_path.clone(), cx)
                     })
-                    .into_any_element(),
-                )
+                } else {
+                    item
+                };
+
+                Some(item.into_any_element())
             }
             SidebarEntry::RecentProject(project_entry) => {
                 let name = project_entry.name.clone();

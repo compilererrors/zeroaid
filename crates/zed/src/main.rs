@@ -612,7 +612,7 @@ fn main() {
         #[cfg(feature = "ai")]
         let disable_ai = DisableAiSettings::get_global(cx).disable_ai;
         let prompt_builder = PromptBuilder::load(app_state.fs.clone(), stdout_is_a_pty(), cx);
-        language_model::init(app_state.client.clone(), cx);
+        language_model::init(app_state.user_store.clone(), app_state.client.clone(), cx);
 
         #[cfg(feature = "ai")]
         if !disable_ai {
@@ -631,7 +631,6 @@ fn main() {
             );
 
             copilot_ui::init(&app_state, cx);
-            supermaven::init(app_state.client.clone(), cx);
             language_models::init(app_state.user_store.clone(), app_state.client.clone(), cx);
             acp_tools::init(cx);
         }
@@ -642,7 +641,7 @@ fn main() {
             edit_prediction_ui::init(cx);
         }
         web_search::init(cx);
-        web_search_providers::init(app_state.client.clone(), cx);
+        web_search_providers::init(app_state.client.clone(), app_state.user_store.clone(), cx);
         snippet_provider::init(cx);
         #[cfg(feature = "ai")]
         if !disable_ai {
@@ -906,7 +905,9 @@ fn handle_open_request(request: OpenRequest, app_state: Arc<AppState>, cx: &mut 
                 .detach_and_log_err(cx);
             }
             #[cfg(feature = "ai")]
-            OpenRequestKind::AgentPanel { initial_prompt } => {
+            OpenRequestKind::AgentPanel {
+                external_source_prompt,
+            } => {
                 cx.spawn(async move |cx| {
                     let multi_workspace =
                         workspace::get_any_active_multi_workspace(app_state, cx.clone()).await?;
@@ -915,7 +916,11 @@ fn handle_open_request(request: OpenRequest, app_state: Arc<AppState>, cx: &mut 
                         multi_workspace.workspace().update(cx, |workspace, cx| {
                             if let Some(panel) = workspace.focus_panel::<AgentPanel>(window, cx) {
                                 panel.update(cx, |panel, cx| {
-                                    panel.new_external_thread_with_text(initial_prompt, window, cx);
+                                    panel.new_agent_thread_with_external_source_prompt(
+                                        external_source_prompt,
+                                        window,
+                                        cx,
+                                    );
                                 });
                             }
                         });

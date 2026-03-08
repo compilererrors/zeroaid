@@ -15,8 +15,6 @@ doctest = false
 [features]
 collab = []
 test-support = [
-    "collab",
-    "call/test-support",
     "client/test-support",
     "http_client/test-support",
     "db/test-support",
@@ -74,7 +72,6 @@ zed_actions.workspace = true
 windows.workspace = true
 
 [dev-dependencies]
-call = { workspace = true, features = ["test-support"] }
 client = { workspace = true, features = ["test-support"] }
 dap = { workspace = true, features = ["test-support"] }
 db = { workspace = true, features = ["test-support"] }
