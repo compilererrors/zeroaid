@@ -1229,7 +1229,7 @@ impl TextThread {
             } => cx.emit(TextThreadEvent::Operation(
                 TextThreadOperation::BufferOperation(operation.clone()),
             )),
-            language::BufferEvent::Edited => {
+            language::BufferEvent::Edited { .. } => {
                 self.count_remaining_tokens(cx);
                 self.reparse(cx);
                 cx.emit(TextThreadEvent::MessagesEdited);

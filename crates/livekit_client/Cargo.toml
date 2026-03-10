@@ -44,8 +44,8 @@ ui.workspace = true
 util.workspace = true
 
 [target.'cfg(not(any(all(target_os = "windows", target_env = "gnu"), target_os = "freebsd")))'.dependencies]
-libwebrtc = { rev = "5f04705ac3f356350ae31534ffbc476abc9ea83d", git = "https://github.com/zed-industries/livekit-rust-sdks" }
-livekit = { rev = "5f04705ac3f356350ae31534ffbc476abc9ea83d", git = "https://github.com/zed-industries/livekit-rust-sdks", features = [
+libwebrtc = { rev = "37835f840d0070d45ac8b31cce6a6ae7aca3f459", git = "https://github.com/zed-industries/livekit-rust-sdks" }
+livekit = { rev = "37835f840d0070d45ac8b31cce6a6ae7aca3f459", git = "https://github.com/zed-industries/livekit-rust-sdks", features = [
     "__rustls-tls"
 ] }
 
@@ -63,7 +63,6 @@ objc.workspace = true
 collections = { workspace = true, features = ["test-support"] }
 gpui = { workspace = true, features = ["test-support"] }
 gpui_platform.workspace = true
-sha2.workspace = true
 simplelog.workspace = true
 
 [build-dependencies]
