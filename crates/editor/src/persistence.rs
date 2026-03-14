@@ -357,6 +357,14 @@ VALUES {placeholders};
 
             let selections = selections[first_selection..last_selection].to_vec();
             self.write(move |conn| {
+                let editor_exists = conn.select_row_bound::<_, i64>(sql!(
+                    SELECT item_id FROM editors WHERE item_id = ?1 AND workspace_id = ?2 LIMIT 1
+                ))?((editor_id, workspace_id))?;
+
+                if editor_exists.is_none() {
+                    return Ok(());
+                }
+
                 let mut statement = Statement::prepare(conn, query)?;
                 statement.bind(&editor_id, 1)?;
                 let mut next_index = statement.bind(&workspace_id, 2)?;
@@ -379,6 +387,14 @@ VALUES {placeholders};
     ) -> Result<()> {
         log::debug!("Saving folds for file {path:?} in workspace {workspace_id:?}");
         self.write(move |conn| {
+            let workspace_exists = conn.select_row_bound::<_, i64>(sql!(
+                SELECT workspace_id FROM workspaces WHERE workspace_id = ?1 LIMIT 1
+            ))?(workspace_id)?;
+
+            if workspace_exists.is_none() {
+                return Ok(());
+            }
+
             // Clear existing folds for this file
             conn.exec_bound(sql!(
                 DELETE FROM file_folds WHERE workspace_id = ?1 AND path = ?2;
@@ -596,5 +612,71 @@ mod tests {
         assert_eq!(retrieved_b.len(), 1);
         assert_eq!(retrieved_a[0].0, 10); // file_a's fold
         assert_eq!(retrieved_b[0].0, 30); // file_b's fold
+    }
+
+    #[gpui::test]
+    async fn test_save_editor_selections_ignores_deleted_workspace() {
+        let workspace_id = workspace::WORKSPACE_DB.next_id().await.unwrap();
+        let editor_id = 1234;
+
+        DB.save_serialized_editor(
+            editor_id,
+            workspace_id,
+            SerializedEditor {
+                abs_path: Some(PathBuf::from("testing.txt")),
+                contents: None,
+                language: None,
+                mtime: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        DB.save_editor_selections(editor_id, workspace_id, vec![(10, 20)])
+            .await
+            .unwrap();
+        assert_eq!(
+            DB.get_editor_selections(editor_id, workspace_id).unwrap(),
+            vec![(10, 20)]
+        );
+
+        workspace::WORKSPACE_DB
+            .delete_workspace_by_id(workspace_id)
+            .await
+            .unwrap();
+
+        DB.save_editor_selections(editor_id, workspace_id, vec![(30, 40)])
+            .await
+            .unwrap();
+        assert!(
+            DB.get_editor_selections(editor_id, workspace_id)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[gpui::test]
+    async fn test_save_file_folds_ignores_deleted_workspace() {
+        let workspace_id = workspace::WORKSPACE_DB.next_id().await.unwrap();
+        let file_path: Arc<Path> = Arc::from(Path::new("/tmp/test_deleted_workspace_folds.rs"));
+
+        workspace::WORKSPACE_DB
+            .delete_workspace_by_id(workspace_id)
+            .await
+            .unwrap();
+
+        DB.save_file_folds(
+            workspace_id,
+            file_path.clone(),
+            vec![(10, 20, "start".to_string(), "end".to_string())],
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            DB.get_file_folds(workspace_id, &file_path)
+                .unwrap()
+                .is_empty()
+        );
     }
 }

@@ -31,6 +31,8 @@ ai = [
     "dep:language_models",
     "sidebar/ai",
     "settings_ui/ai",
+    "title_bar/ai",
+    "workspace/ai",
 ]
 collab = [
     "audio",

@@ -3,7 +3,11 @@ use std::process::Command;
 
 fn main() {
     #[cfg(target_os = "linux")]
-    {
+    let has_webrtc_support = std::env::var_os("CARGO_FEATURE_AUDIO").is_some()
+        || std::env::var_os("CARGO_FEATURE_COLLAB").is_some();
+
+    #[cfg(target_os = "linux")]
+    if has_webrtc_support {
         // Add rpaths for libraries that webrtc-sys dlopens at runtime.
         // This is mostly required for hosts with non-standard SO installation
         // locations such as NixOS.

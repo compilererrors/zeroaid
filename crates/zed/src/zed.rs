@@ -75,6 +75,7 @@ use settings::{
     initial_local_debug_tasks_content, initial_project_settings_content, initial_tasks_content,
     update_settings_file,
 };
+use sidebar::Sidebar;
 #[cfg(feature = "audio")]
 use std::time::Duration;
 use std::{
@@ -384,11 +385,15 @@ pub fn initialize_workspace(
     })
     .detach();
 
-    cx.observe_new(|_multi_workspace: &mut MultiWorkspace, window, cx| {
+    cx.observe_new(|multi_workspace: &mut MultiWorkspace, window, cx| {
         let Some(window) = window else {
             return;
         };
-        let multi_workspace_handle = cx.entity().downgrade();
+        let multi_workspace_handle = cx.entity();
+        let sidebar = cx.new(|cx| Sidebar::new(multi_workspace_handle.clone(), window, cx));
+        multi_workspace.register_sidebar(sidebar, window, cx);
+
+        let multi_workspace_handle = multi_workspace_handle.downgrade();
         window.on_window_should_close(cx, move |window, cx| {
             multi_workspace_handle
                 .update(cx, |multi_workspace, cx| {

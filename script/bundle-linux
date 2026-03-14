@@ -47,6 +47,11 @@ export ZED_BUNDLE=true
 
 channel=$(<crates/zed/RELEASE_CHANNEL)
 target_dir="${CARGO_TARGET_DIR:-target}"
+zed_build_flags=(--no-default-features)
+
+if [[ -n "${ZED_BUILD_FEATURES:-}" ]]; then
+    zed_build_flags+=(--features "${ZED_BUILD_FEATURES}")
+fi
 
 version="$(script/get-crate-version zed)"
 # Set RELEASE_VERSION so it's compiled into GPUI and it knows about the version.
@@ -75,7 +80,8 @@ export CC=${CC:-$(which clang)}
 
 # Build binary in release mode
 export RUSTFLAGS="${RUSTFLAGS:-} -C link-args=-Wl,--disable-new-dtags,-rpath,\$ORIGIN/../lib"
-cargo build --release --target "${target_triple}" --package zed --package cli
+cargo build --release --target "${target_triple}" --package zed "${zed_build_flags[@]}"
+cargo build --release --target "${target_triple}" --package cli
 # Build remote_server in separate invocation to prevent feature unification from other crates
 # from influencing dynamic libraries required by it.
 if [[ "$remote_server_triple" == "$musl_triple" ]]; then

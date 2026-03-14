@@ -13,10 +13,12 @@ path = "src/title_bar.rs"
 doctest = false
 
 [features]
+ai = []
 default = []
 collab = ["dep:call", "dep:channel"]
 stories = ["dep:story"]
 test-support = [
+    "ai",
     "collab",
     "call/test-support",
     "client/test-support",

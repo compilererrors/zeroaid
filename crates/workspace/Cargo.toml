@@ -13,8 +13,10 @@ path = "src/workspace.rs"
 doctest = false
 
 [features]
+ai = []
 collab = []
 test-support = [
+    "ai",
     "client/test-support",
     "http_client/test-support",
     "db/test-support",

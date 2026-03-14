@@ -12,7 +12,7 @@ workspace = true
 path = "src/settings_ui.rs"
 
 [features]
-default = ["ai", "collab"]
+default = []
 ai = [
     "dep:agent",
     "dep:agent_settings",

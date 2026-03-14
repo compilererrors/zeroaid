@@ -27,6 +27,11 @@ $Architecture = if ($Architecture) {
 }
 
 $CargoOutDir = "./target/$Architecture-pc-windows-msvc/release"
+$ZedFeatureFlags = @("--no-default-features")
+
+if ($env:ZED_BUILD_FEATURES) {
+    $ZedFeatureFlags += @("--features", $env:ZED_BUILD_FEATURES)
+}
 
 function Get-VSArch {
     param(
@@ -102,7 +107,8 @@ function GenerateLicenses {
 function BuildZedAndItsFriends {
     Write-Output "Building Zed and its friends, for channel: $channel"
     # Build zed.exe, cli.exe and auto_update_helper.exe
-    cargo build --release --package zed --package cli --package auto_update_helper --target $target
+    cargo build --release --package zed --target $target @ZedFeatureFlags
+    cargo build --release --package cli --package auto_update_helper --target $target
     Copy-Item -Path ".\$CargoOutDir\zed.exe" -Destination "$innoDir\Zed.exe" -Force
     Copy-Item -Path ".\$CargoOutDir\cli.exe" -Destination "$innoDir\cli.exe" -Force
     Copy-Item -Path ".\$CargoOutDir\auto_update_helper.exe" -Destination "$innoDir\auto_update_helper.exe" -Force

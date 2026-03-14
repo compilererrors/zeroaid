@@ -8,7 +8,7 @@ target_dir="release"
 open_result=false
 local_install=false
 can_code_sign=false
-cargo_feature_flags=()
+zed_feature_flags=(--no-default-features)
 
 # This must match the team in the provisioning profile.
 IDENTITY="Zed Industries, Inc."
@@ -22,13 +22,17 @@ Build the application bundle for macOS.
 
 Options:
   -d    Compile in debug mode
-  -n    Build zed without default Cargo features.
+  -n    No-op for compatibility; zed already builds without default Cargo features.
   -f    Additional Cargo features for zed (comma-separated, repeatable).
   -o    Open dir with the resulting DMG or launch the app itself in local mode.
   -i    Install the resulting DMG into /Applications.
   -h    Display this help and exit.
   "
 }
+
+if [[ -n "${ZED_BUILD_FEATURES:-}" ]]; then
+    zed_feature_flags+=(--features "${ZED_BUILD_FEATURES}")
+fi
 
 while getopts 'dloinf:h' flag
 do
@@ -40,11 +44,9 @@ do
             build_flag="";
             target_dir="debug"
             ;;
-        n)
-            cargo_feature_flags+=(--no-default-features)
-            ;;
+        n) ;;
         f)
-            cargo_feature_flags+=(--features "${OPTARG}")
+            zed_feature_flags+=(--features "${OPTARG}")
             ;;
         i) local_install=true;;
         h)
@@ -144,7 +146,7 @@ script/generate-licenses
 rustup target add $target_triple
 
 echo "Compiling zed binaries"
-cargo build ${build_flag} --package zed --target $target_triple "${cargo_feature_flags[@]}"
+cargo build ${build_flag} --package zed --target $target_triple "${zed_feature_flags[@]}"
 cargo build ${build_flag} --package cli --target $target_triple
 # Build remote_server in separate invocation to prevent feature unification from other crates
 # from influencing dynamic libraries required by it.
@@ -177,7 +179,7 @@ app_path=$(
     CARGO_TERM_COLOR=never \
     CLICOLOR=0 \
     CLICOLOR_FORCE=0 \
-    cargo bundle ${build_flag} --target $target_triple --select-workspace-root "${cargo_feature_flags[@]}" \
+    cargo bundle ${build_flag} --target $target_triple --select-workspace-root "${zed_feature_flags[@]}" \
         2>"${bundle_stderr}" \
         | xargs
     bundle_status=$?

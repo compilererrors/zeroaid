@@ -8,8 +8,9 @@ fn main() {
 #[cfg(target_os = "macos")]
 mod macos_build {
     use std::{
-        env,
+        env, fs,
         path::{Path, PathBuf},
+        process::Command,
     };
 
     use cbindgen::Config;
@@ -122,18 +123,16 @@ mod macos_build {
 
     #[cfg(not(feature = "runtime_shaders"))]
     fn compile_metal_shaders(header_path: &Path) {
-        use std::process::{self, Command};
+        use std::process;
         let shader_path = "./src/shaders.metal";
         let air_output_path = PathBuf::from(env::var("OUT_DIR").unwrap()).join("shaders.air");
         let metallib_output_path =
             PathBuf::from(env::var("OUT_DIR").unwrap()).join("shaders.metallib");
         println!("cargo:rerun-if-changed={}", shader_path);
 
-        let output = Command::new("xcrun")
+        let metal_path = find_metal_tool("metal");
+        let output = Command::new(&metal_path)
             .args([
-                "-sdk",
-                "macosx",
-                "metal",
                 "-gline-tables-only",
                 "-mmacosx-version-min=10.15.7",
                 "-MO",
@@ -155,8 +154,8 @@ mod macos_build {
             process::exit(1);
         }
 
-        let output = Command::new("xcrun")
-            .args(["-sdk", "macosx", "metallib"])
+        let metallib_path = find_metal_tool("metallib");
+        let output = Command::new(&metallib_path)
             .arg(air_output_path)
             .arg("-o")
             .arg(metallib_output_path)
@@ -170,5 +169,55 @@ mod macos_build {
             );
             process::exit(1);
         }
+    }
+
+    #[cfg(not(feature = "runtime_shaders"))]
+    fn find_metal_tool(tool_name: &str) -> PathBuf {
+        let xcrun_path = Command::new("xcrun")
+            .args(["-sdk", "macosx", "--find", tool_name])
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|output| PathBuf::from(String::from_utf8_lossy(&output.stdout).trim()));
+
+        if let Some(path) = xcrun_path.filter(|path| validate_metal_tool(path, tool_name)) {
+            return path;
+        }
+
+        if let Some(path) = find_cryptex_metal_tool(tool_name) {
+            return path;
+        }
+
+        panic!("Unable to locate a working Metal tool: {tool_name}");
+    }
+
+    #[cfg(not(feature = "runtime_shaders"))]
+    fn validate_metal_tool(path: &Path, tool_name: &str) -> bool {
+        let validation_flag = if tool_name == "metal" { "-v" } else { "-h" };
+        Command::new(path)
+            .arg(validation_flag)
+            .output()
+            .is_ok_and(|output| output.status.success())
+    }
+
+    #[cfg(not(feature = "runtime_shaders"))]
+    fn find_cryptex_metal_tool(tool_name: &str) -> Option<PathBuf> {
+        let cryptex_root = Path::new("/private/var/run/com.apple.security.cryptexd/mnt");
+        let suffix = format!("/Metal.xctoolchain/usr/bin/{tool_name}");
+
+        fs::read_dir(cryptex_root)
+            .ok()?
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("com.apple.MobileAsset.MetalToolchain-"))
+            })
+            .filter_map(|path| {
+                let candidate = PathBuf::from(format!("{}{}", path.display(), suffix));
+                validate_metal_tool(&candidate, tool_name).then_some(candidate)
+            })
+            .max()
     }
 }

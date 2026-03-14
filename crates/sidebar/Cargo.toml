@@ -12,15 +12,20 @@ workspace = true
 path = "src/sidebar.rs"
 
 [features]
-default = ["ai"]
-ai = []
-test-support = []
+default = []
+ai = [
+    "dep:acp_thread",
+    "dep:agent",
+    "dep:agent-client-protocol",
+    "dep:agent_ui",
+]
+test-support = ["ai"]
 
 [dependencies]
-acp_thread.workspace = true
-agent.workspace = true
-agent-client-protocol.workspace = true
-agent_ui.workspace = true
+acp_thread = { workspace = true, optional = true }
+agent = { workspace = true, optional = true }
+agent-client-protocol = { workspace = true, optional = true }
+agent_ui = { workspace = true, optional = true }
 chrono.workspace = true
 editor.workspace = true
 feature_flags.workspace = true
