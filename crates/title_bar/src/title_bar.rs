@@ -2,6 +2,7 @@ mod application_menu;
 #[cfg(feature = "collab")]
 pub mod collab;
 mod onboarding_banner;
+mod plan_chip;
 mod title_bar_settings;
 mod update_version;
 
@@ -9,6 +10,7 @@ mod update_version;
 mod stories;
 
 use crate::application_menu::{ApplicationMenu, show_menus};
+use crate::plan_chip::PlanChip;
 pub use platform_title_bar::{
     self, DraggedWindowTab, MergeAllWindows, MoveTabToNewWindow, PlatformTitleBar,
     ShowNextWindowTab, ShowPreviousWindowTab,
@@ -24,16 +26,13 @@ use auto_update::AutoUpdateStatus;
 use call::ActiveCall;
 use client::{Client, UserStore, zed_urls};
 use cloud_api_types::Plan;
-use feature_flags::{AgentV2FeatureFlag, FeatureFlagAppExt};
 use gpui::{
     Action, AnyElement, App, Context, Corner, Element, Entity, Focusable, InteractiveElement,
     IntoElement, MouseButton, ParentElement, Render, StatefulInteractiveElement, Styled,
     Subscription, WeakEntity, Window, actions, div,
 };
 use onboarding_banner::OnboardingBanner;
-use project::{
-    DisableAiSettings, Project, git_store::GitStoreEvent, trusted_worktrees::TrustedWorktrees,
-};
+use project::{Project, git_store::GitStoreEvent, trusted_worktrees::TrustedWorktrees};
 use remote::RemoteConnectionOptions;
 use settings::Settings;
 use settings::WorktreeId;
@@ -43,14 +42,13 @@ use title_bar_settings::TitleBarSettings;
 #[cfg(feature = "collab")]
 use ui::PopoverMenuHandle;
 use ui::{
-    Avatar, ButtonLike, Chip, ContextMenu, IconWithIndicator, Indicator, PopoverMenu, TintColor,
+    Avatar, ButtonLike, ContextMenu, IconWithIndicator, Indicator, PopoverMenu, TintColor,
     Tooltip, prelude::*, utils::platform_title_bar_height,
 };
 use update_version::UpdateVersion;
 use util::ResultExt;
 use workspace::{
-    MultiWorkspace, ToggleWorkspaceSidebar, ToggleWorktreeSecurity, Workspace,
-    notifications::NotifyResultExt,
+    MultiWorkspace, ToggleWorktreeSecurity, Workspace, notifications::NotifyResultExt,
 };
 use zed_actions::OpenRemote;
 
@@ -177,7 +175,6 @@ impl Render for TitleBar {
                     let mut render_project_items = title_bar_settings.show_branch_name
                         || title_bar_settings.show_project_items;
                     title_bar
-                        .children(self.render_workspace_sidebar_toggle(window, cx))
                         .when_some(
                             self.application_menu.clone().filter(|_| !show_menus),
                             |title_bar, menu| {
@@ -362,7 +359,6 @@ impl TitleBar {
 
         // Set up observer to sync sidebar state from MultiWorkspace to PlatformTitleBar.
         {
-            let platform_titlebar = platform_titlebar.clone();
             let window_handle = window.window_handle();
             cx.spawn(async move |this: WeakEntity<TitleBar>, cx| {
                 let Some(multi_workspace_handle) = window_handle.downcast::<MultiWorkspace>()
@@ -375,26 +371,8 @@ impl TitleBar {
                         return;
                     };
 
-                    let is_open = multi_workspace.read(cx).is_sidebar_open();
-                    let has_notifications = multi_workspace.read(cx).sidebar_has_notifications(cx);
-                    platform_titlebar.update(cx, |titlebar, cx| {
-                        titlebar.set_workspace_sidebar_open(is_open, cx);
-                        titlebar.set_sidebar_has_notifications(has_notifications, cx);
-                    });
-
-                    let platform_titlebar = platform_titlebar.clone();
-                    let subscription = cx.observe(&multi_workspace, move |mw, cx| {
-                        let is_open = mw.read(cx).is_sidebar_open();
-                        let has_notifications = mw.read(cx).sidebar_has_notifications(cx);
-                        platform_titlebar.update(cx, |titlebar, cx| {
-                            titlebar.set_workspace_sidebar_open(is_open, cx);
-                            titlebar.set_sidebar_has_notifications(has_notifications, cx);
-                        });
-                    });
-
                     if let Some(this) = this.upgrade() {
                         this.update(cx, |this, _| {
-                            this._subscriptions.push(subscription);
                             this.multi_workspace = Some(multi_workspace.downgrade());
                         });
                     }
@@ -613,10 +591,11 @@ impl TitleBar {
             .style(ButtonStyle::Tinted(TintColor::Warning))
             .label_size(LabelSize::Small)
             .color(Color::Warning)
-            .icon(IconName::Warning)
-            .icon_color(Color::Warning)
-            .icon_size(IconSize::Small)
-            .icon_position(IconPosition::Start)
+            .start_icon(
+                Icon::new(IconName::Warning)
+                    .size(IconSize::Small)
+                    .color(Color::Warning),
+            )
             .tooltip(|_, cx| {
                 Tooltip::with_meta(
                     "You're in Restricted Mode",
@@ -692,46 +671,7 @@ impl TitleBar {
         )
     }
 
-    fn render_workspace_sidebar_toggle(
-        &self,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        if !cx.has_flag::<AgentV2FeatureFlag>() || DisableAiSettings::get_global(cx).disable_ai {
-            return None;
-        }
-
-        let is_sidebar_open = self.platform_titlebar.read(cx).is_workspace_sidebar_open();
-
-        if is_sidebar_open {
-            return None;
-        }
-
-        let has_notifications = self.platform_titlebar.read(cx).sidebar_has_notifications();
-
-        Some(
-            IconButton::new("toggle-workspace-sidebar", IconName::WorkspaceNavClosed)
-                .icon_size(IconSize::Small)
-                .when(has_notifications, |button| {
-                    button
-                        .indicator(Indicator::dot().color(Color::Accent))
-                        .indicator_border_color(Some(cx.theme().colors().title_bar_background))
-                })
-                .tooltip(move |_, cx| {
-                    Tooltip::for_action("Open Workspace Sidebar", &ToggleWorkspaceSidebar, cx)
-                })
-                .on_click(|_, window, cx| {
-                    window.dispatch_action(ToggleWorkspaceSidebar.boxed_clone(), cx);
-                })
-                .into_any_element(),
-        )
-    }
-
-    pub fn render_project_name(
-        &self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    pub fn render_project_name(&self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let workspace = self.workspace.clone();
 
         let name = self.effective_active_worktree(cx).map(|worktree| {
@@ -746,19 +686,6 @@ impl TitleBar {
         } else {
             "Open Recent Project".to_string()
         };
-
-        let is_sidebar_open = self.platform_titlebar.read(cx).is_workspace_sidebar_open();
-
-        if is_sidebar_open {
-            return self
-                .render_project_name_with_sidebar_popover(
-                    window,
-                    display_name,
-                    is_project_selected,
-                    cx,
-                )
-                .into_any_element();
-        }
 
         let focus_handle = workspace
             .upgrade()
@@ -779,9 +706,11 @@ impl TitleBar {
                 Button::new("project_name_trigger", display_name)
                     .label_size(LabelSize::Small)
                     .when(self.worktree_count(cx) > 1, |this| {
-                        this.icon(IconName::ChevronDown)
-                            .icon_color(Color::Muted)
-                            .icon_size(IconSize::XSmall)
+                        this.end_icon(
+                            Icon::new(IconName::ChevronDown)
+                                .size(IconSize::XSmall)
+                                .color(Color::Muted),
+                        )
                     })
                     .selected_style(ButtonStyle::Tinted(TintColor::Accent))
                     .when(!is_project_selected, |s| s.color(Color::Muted)),
@@ -797,49 +726,6 @@ impl TitleBar {
             )
             .anchor(gpui::Corner::TopLeft)
             .into_any_element()
-    }
-
-    fn render_project_name_with_sidebar_popover(
-        &self,
-        _window: &Window,
-        display_name: String,
-        is_project_selected: bool,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let multi_workspace = self.multi_workspace.clone();
-
-        let is_popover_deployed = multi_workspace
-            .as_ref()
-            .and_then(|mw| mw.upgrade())
-            .map(|mw| mw.read(cx).is_recent_projects_popover_deployed(cx))
-            .unwrap_or(false);
-
-        Button::new("project_name_trigger", display_name)
-            .label_size(LabelSize::Small)
-            .when(self.worktree_count(cx) > 1, |this| {
-                this.icon(IconName::ChevronDown)
-                    .icon_color(Color::Muted)
-                    .icon_size(IconSize::XSmall)
-            })
-            .toggle_state(is_popover_deployed)
-            .selected_style(ButtonStyle::Tinted(TintColor::Accent))
-            .when(!is_project_selected, |s| s.color(Color::Muted))
-            .tooltip(move |_window, cx| {
-                Tooltip::for_action(
-                    "Recent Projects",
-                    &zed_actions::OpenRecent {
-                        create_new_window: false,
-                    },
-                    cx,
-                )
-            })
-            .on_click(move |_, window, cx| {
-                if let Some(mw) = multi_workspace.as_ref().and_then(|mw| mw.upgrade()) {
-                    mw.update(cx, |mw, cx| {
-                        mw.toggle_recent_projects_popover(window, cx);
-                    });
-                }
-            })
     }
 
     pub fn render_project_branch(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
@@ -904,11 +790,9 @@ impl TitleBar {
                         .color(Color::Muted)
                         .when(settings.show_branch_icon, |branch_button| {
                             let (icon, icon_color) = icon_info;
-                            branch_button
-                                .icon(icon)
-                                .icon_position(IconPosition::Start)
-                                .icon_color(icon_color)
-                                .icon_size(IconSize::Indicator)
+                            branch_button.start_icon(
+                                Icon::new(icon).size(IconSize::Indicator).color(icon_color),
+                            )
                         }),
                     move |_window, cx| {
                         Tooltip::with_meta(
@@ -1048,32 +932,11 @@ impl TitleBar {
             has_subscription_period
         });
 
-        let free_chip_bg = cx
-            .theme()
-            .colors()
-            .editor_background
-            .opacity(0.5)
-            .blend(cx.theme().colors().text_accent.opacity(0.05));
-
-        let pro_chip_bg = cx
-            .theme()
-            .colors()
-            .editor_background
-            .opacity(0.5)
-            .blend(cx.theme().colors().text_accent.opacity(0.2));
-
         PopoverMenu::new("user-menu")
             .anchor(Corner::TopRight)
             .menu(move |window, cx| {
                 ContextMenu::build(window, cx, |menu, _, _cx| {
                     let user_login = user_login.clone();
-
-                    let (plan_name, label_color, bg_color) = match plan {
-                        None | Some(Plan::ZedFree) => ("Free", Color::Default, free_chip_bg),
-                        Some(Plan::ZedProTrial) => ("Pro Trial", Color::Accent, pro_chip_bg),
-                        Some(Plan::ZedPro) => ("Pro", Color::Accent, pro_chip_bg),
-                        Some(Plan::ZedStudent) => ("Student", Color::Accent, pro_chip_bg),
-                    };
 
                     menu.when(is_signed_in, |this| {
                         this.custom_entry(
@@ -1084,11 +947,7 @@ impl TitleBar {
                                     .w_full()
                                     .justify_between()
                                     .child(Label::new(user_login))
-                                    .child(
-                                        Chip::new(plan_name.to_string())
-                                            .bg_color(bg_color)
-                                            .label_color(label_color),
-                                    )
+                                    .child(PlanChip::new(plan.unwrap_or(Plan::ZedFree)))
                                     .into_any_element()
                             },
                             move |_, cx| {

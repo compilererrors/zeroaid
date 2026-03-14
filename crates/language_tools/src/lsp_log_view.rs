@@ -19,7 +19,7 @@ use project::{
 };
 use proto::toggle_lsp_logs::LogType;
 use std::{any::TypeId, borrow::Cow, sync::Arc};
-use ui::{Button, Checkbox, ContextMenu, Label, PopoverMenu, ToggleState, prelude::*};
+use ui::{Checkbox, ContextMenu, PopoverMenu, ToggleState, prelude::*};
 use util::ResultExt as _;
 use workspace::{
     SplitDirection, ToolbarItemEvent, ToolbarItemLocation, ToolbarItemView, Workspace, WorkspaceId,
@@ -974,9 +974,11 @@ impl Render for LspLogToolbarItemView {
                         })
                         .unwrap_or_else(|| "No server selected".into()),
                 )
-                .icon(IconName::ChevronDown)
-                .icon_size(IconSize::Small)
-                .icon_color(Color::Muted),
+                .end_icon(
+                    Icon::new(IconName::ChevronDown)
+                        .size(IconSize::Small)
+                        .color(Color::Muted),
+                ),
             )
             .menu({
                 let log_view = log_view.clone();
@@ -1035,10 +1037,11 @@ impl Render for LspLogToolbarItemView {
             PopoverMenu::new("LspViewSelector")
                 .anchor(Corner::TopLeft)
                 .trigger(
-                    Button::new("language_server_menu_header", label)
-                        .icon(IconName::ChevronDown)
-                        .icon_size(IconSize::Small)
-                        .icon_color(Color::Muted),
+                    Button::new("language_server_menu_header", label).end_icon(
+                        Icon::new(IconName::ChevronDown)
+                            .size(IconSize::Small)
+                            .color(Color::Muted),
+                    ),
                 )
                 .menu(move |window, cx| {
                     let log_toolbar_view = log_toolbar_view.upgrade()?;
@@ -1130,9 +1133,11 @@ impl Render for LspLogToolbarItemView {
                                                 "language_server_trace_level_selector",
                                                 "Trace level",
                                             )
-                                            .icon(IconName::ChevronDown)
-                                            .icon_size(IconSize::Small)
-                                            .icon_color(Color::Muted),
+                                            .end_icon(
+                                                Icon::new(IconName::ChevronDown)
+                                                    .size(IconSize::Small)
+                                                    .color(Color::Muted),
+                                            ),
                                         )
                                         .menu({
                                             let log_view = log_view;
@@ -1198,9 +1203,11 @@ impl Render for LspLogToolbarItemView {
                                                 "language_server_log_level_selector",
                                                 "Log level",
                                             )
-                                            .icon(IconName::ChevronDown)
-                                            .icon_size(IconSize::Small)
-                                            .icon_color(Color::Muted),
+                                            .end_icon(
+                                                Icon::new(IconName::ChevronDown)
+                                                    .size(IconSize::Small)
+                                                    .color(Color::Muted),
+                                            ),
                                         )
                                         .menu({
                                             let log_view = log_view;
