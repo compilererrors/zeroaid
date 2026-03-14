@@ -865,8 +865,47 @@ impl Render for MultiWorkspace {
 mod tests {
     use super::*;
     use fs::FakeFs;
-    use gpui::TestAppContext;
+    use gpui::{Focusable, TestAppContext};
     use settings::SettingsStore;
+
+    struct TestSidebar {
+        focus_handle: FocusHandle,
+        width: Pixels,
+    }
+
+    impl EventEmitter<SidebarEvent> for TestSidebar {}
+
+    impl Focusable for TestSidebar {
+        fn focus_handle(&self, _cx: &App) -> FocusHandle {
+            self.focus_handle.clone()
+        }
+    }
+
+    impl Render for TestSidebar {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            gpui::Empty
+        }
+    }
+
+    impl Sidebar for TestSidebar {
+        fn width(&self, _cx: &App) -> Pixels {
+            self.width
+        }
+
+        fn set_width(&mut self, width: Option<Pixels>, _cx: &mut Context<Self>) {
+            self.width = width.unwrap_or(px(320.0));
+        }
+
+        fn has_notifications(&self, _cx: &App) -> bool {
+            false
+        }
+
+        fn toggle_recent_projects_popover(&self, _window: &mut Window, _cx: &mut App) {}
+
+        fn is_recent_projects_popover_deployed(&self) -> bool {
+            false
+        }
+    }
 
     fn init_test(cx: &mut TestAppContext) {
         cx.update(|cx| {
@@ -880,6 +919,19 @@ mod tests {
         });
     }
 
+    fn register_test_sidebar(
+        multi_workspace: &Entity<MultiWorkspace>,
+        cx: &mut gpui::VisualTestContext,
+    ) {
+        multi_workspace.update_in(cx, |multi_workspace, window, cx| {
+            let sidebar = cx.new(|cx| TestSidebar {
+                focus_handle: cx.focus_handle(),
+                width: px(320.0),
+            });
+            multi_workspace.register_sidebar(sidebar, window, cx);
+        });
+    }
+
     #[cfg(feature = "ai")]
     #[gpui::test]
     async fn test_sidebar_disabled_when_disable_ai_is_enabled(cx: &mut TestAppContext) {
@@ -889,6 +941,7 @@ mod tests {
 
         let (multi_workspace, cx) =
             cx.add_window_view(|window, cx| MultiWorkspace::test_new(project, window, cx));
+        register_test_sidebar(&multi_workspace, cx);
 
         multi_workspace.read_with(cx, |mw, cx| {
             assert!(mw.multi_workspace_enabled(cx));
@@ -961,6 +1014,7 @@ mod tests {
 
         let (multi_workspace, cx) =
             cx.add_window_view(|window, cx| MultiWorkspace::test_new(project, window, cx));
+        register_test_sidebar(&multi_workspace, cx);
 
         multi_workspace.read_with(cx, |multi_workspace, cx| {
             assert!(multi_workspace.multi_workspace_enabled(cx));
