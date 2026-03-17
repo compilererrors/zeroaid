@@ -6238,7 +6238,6 @@ dependencies = [
  "serde",
  "serde_json",
  "settings",
- "text",
  "theme",
  "ui",
  "util",
@@ -6525,6 +6524,7 @@ dependencies = [
  "async-trait",
  "cocoa 0.26.0",
  "collections",
+ "dunce",
  "fs",
  "futures 0.3.31",
  "git",
@@ -7297,6 +7297,7 @@ dependencies = [
  "db",
  "editor",
  "feature_flags",
+ "file_icons",
  "futures 0.3.31",
  "fuzzy",
  "git",
@@ -7461,6 +7462,7 @@ dependencies = [
  "indoc",
  "language",
  "menu",
+ "multi_buffer",
  "project",
  "rope",
  "serde",
@@ -9699,7 +9701,7 @@ dependencies = [
 [[package]]
 name = "libwebrtc"
 version = "0.3.26"
-source = "git+https://github.com/zed-industries/livekit-rust-sdks?rev=37835f840d0070d45ac8b31cce6a6ae7aca3f459#37835f840d0070d45ac8b31cce6a6ae7aca3f459"
+source = "git+https://github.com/zed-industries/livekit-rust-sdks?rev=c1209aa155cbf4543383774f884a46ae7e53ee2e#c1209aa155cbf4543383774f884a46ae7e53ee2e"
 dependencies = [
  "cxx",
  "glib",
@@ -9797,7 +9799,7 @@ checksum = "11d3d7f243d5c5a8b9bb5d6dd2b1602c0cb0b9db1621bafc7ed66e35ff9fe092"
 [[package]]
 name = "livekit"
 version = "0.7.32"
-source = "git+https://github.com/zed-industries/livekit-rust-sdks?rev=37835f840d0070d45ac8b31cce6a6ae7aca3f459#37835f840d0070d45ac8b31cce6a6ae7aca3f459"
+source = "git+https://github.com/zed-industries/livekit-rust-sdks?rev=c1209aa155cbf4543383774f884a46ae7e53ee2e#c1209aa155cbf4543383774f884a46ae7e53ee2e"
 dependencies = [
  "base64 0.22.1",
  "bmrng",
@@ -9823,7 +9825,7 @@ dependencies = [
 [[package]]
 name = "livekit-api"
 version = "0.4.14"
-source = "git+https://github.com/zed-industries/livekit-rust-sdks?rev=37835f840d0070d45ac8b31cce6a6ae7aca3f459#37835f840d0070d45ac8b31cce6a6ae7aca3f459"
+source = "git+https://github.com/zed-industries/livekit-rust-sdks?rev=c1209aa155cbf4543383774f884a46ae7e53ee2e#c1209aa155cbf4543383774f884a46ae7e53ee2e"
 dependencies = [
  "base64 0.21.7",
  "futures-util",
@@ -9848,7 +9850,7 @@ dependencies = [
 [[package]]
 name = "livekit-protocol"
 version = "0.7.1"
-source = "git+https://github.com/zed-industries/livekit-rust-sdks?rev=37835f840d0070d45ac8b31cce6a6ae7aca3f459#37835f840d0070d45ac8b31cce6a6ae7aca3f459"
+source = "git+https://github.com/zed-industries/livekit-rust-sdks?rev=c1209aa155cbf4543383774f884a46ae7e53ee2e#c1209aa155cbf4543383774f884a46ae7e53ee2e"
 dependencies = [
  "futures-util",
  "livekit-runtime",
@@ -9864,7 +9866,7 @@ dependencies = [
 [[package]]
 name = "livekit-runtime"
 version = "0.4.0"
-source = "git+https://github.com/zed-industries/livekit-rust-sdks?rev=37835f840d0070d45ac8b31cce6a6ae7aca3f459#37835f840d0070d45ac8b31cce6a6ae7aca3f459"
+source = "git+https://github.com/zed-industries/livekit-rust-sdks?rev=c1209aa155cbf4543383774f884a46ae7e53ee2e#c1209aa155cbf4543383774f884a46ae7e53ee2e"
 dependencies = [
  "tokio",
  "tokio-stream",
@@ -10186,6 +10188,7 @@ dependencies = [
  "pretty_assertions",
  "pulldown-cmark 0.13.0",
  "settings",
+ "stacksafe",
  "theme",
  "ui",
  "urlencoding",
@@ -15766,19 +15769,23 @@ name = "sidebar"
 version = "0.1.0"
 dependencies = [
  "acp_thread",
+ "action_log",
  "agent",
  "agent-client-protocol",
  "agent_ui",
+ "anyhow",
  "assistant_text_thread",
  "chrono",
  "editor",
  "feature_flags",
  "fs",
+ "git",
  "gpui",
  "language_model",
  "menu",
+ "pretty_assertions",
  "project",
- "recent_projects",
+ "prompt_store",
  "serde_json",
  "settings",
  "theme",
@@ -17635,6 +17642,7 @@ dependencies = [
  "client",
  "cloud_api_types",
  "db",
+ "feature_flags",
  "git_ui",
  "gpui",
  "notifications",
@@ -19893,7 +19901,7 @@ dependencies = [
 [[package]]
 name = "webrtc-sys"
 version = "0.3.23"
-source = "git+https://github.com/zed-industries/livekit-rust-sdks?rev=37835f840d0070d45ac8b31cce6a6ae7aca3f459#37835f840d0070d45ac8b31cce6a6ae7aca3f459"
+source = "git+https://github.com/zed-industries/livekit-rust-sdks?rev=c1209aa155cbf4543383774f884a46ae7e53ee2e#c1209aa155cbf4543383774f884a46ae7e53ee2e"
 dependencies = [
  "cc",
  "cxx",
@@ -19907,7 +19915,7 @@ dependencies = [
 [[package]]
 name = "webrtc-sys-build"
 version = "0.3.13"
-source = "git+https://github.com/zed-industries/livekit-rust-sdks?rev=37835f840d0070d45ac8b31cce6a6ae7aca3f459#37835f840d0070d45ac8b31cce6a6ae7aca3f459"
+source = "git+https://github.com/zed-industries/livekit-rust-sdks?rev=c1209aa155cbf4543383774f884a46ae7e53ee2e#c1209aa155cbf4543383774f884a46ae7e53ee2e"
 dependencies = [
  "anyhow",
  "fs2",
@@ -22047,14 +22055,14 @@ dependencies = [
 
 [[package]]
 name = "zed_glsl"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "zed_extension_api 0.1.0",
 ]
 
 [[package]]
 name = "zed_html"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "zed_extension_api 0.7.0",
 ]
