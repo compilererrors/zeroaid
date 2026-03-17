@@ -76,6 +76,7 @@ use settings::{
     update_settings_file,
 };
 use sidebar::Sidebar;
+#[cfg(feature = "audio")]
 use std::time::Duration;
 use std::{
     borrow::Cow,
@@ -390,7 +391,7 @@ pub fn initialize_workspace(
         };
         let multi_workspace_handle = cx.entity();
         let sidebar = cx.new(|cx| Sidebar::new(multi_workspace_handle.clone(), window, cx));
-        multi_workspace.register_sidebar(sidebar, window, cx);
+        multi_workspace.register_sidebar(sidebar);
 
         let multi_workspace_handle = multi_workspace_handle.downgrade();
         window.on_window_should_close(cx, move |window, cx| {
@@ -5192,18 +5193,22 @@ mod tests {
             theme::init(theme::LoadThemes::JustBase, cx);
             #[cfg(feature = "audio")]
             audio::init(cx);
-            channel::init(&app_state.client, app_state.user_store.clone(), cx);
-            call::init(app_state.client.clone(), app_state.user_store.clone(), cx);
             notifications::init(app_state.client.clone(), app_state.user_store.clone(), cx);
+            #[cfg(feature = "collab")]
+            channel::init(&app_state.client, app_state.user_store.clone(), cx);
+            #[cfg(feature = "collab")]
+            call::init(app_state.client.clone(), app_state.user_store.clone(), cx);
             workspace::init(app_state.clone(), cx);
             release_channel::init(Version::new(0, 0, 0), cx);
             command_palette::init(cx);
             editor::init(cx);
+            #[cfg(feature = "collab")]
             collab_ui::init(&app_state, cx);
             git_ui::init(cx);
             project_panel::init(cx);
             outline_panel::init(cx);
             terminal_view::init(cx);
+            #[cfg(feature = "ai")]
             copilot_chat::init(
                 app_state.fs.clone(),
                 app_state.client.http_client(),
@@ -5211,17 +5216,20 @@ mod tests {
                 cx,
             );
             image_viewer::init(cx);
-            language_model::init(app_state.client.clone(), cx);
+            language_model::init(app_state.user_store.clone(), app_state.client.clone(), cx);
+            #[cfg(feature = "ai")]
             language_models::init(app_state.user_store.clone(), app_state.client.clone(), cx);
             web_search::init(cx);
             git_graph::init(cx);
-            web_search_providers::init(app_state.client.clone(), cx);
+            web_search_providers::init(app_state.client.clone(), app_state.user_store.clone(), cx);
             let prompt_builder = PromptBuilder::load(app_state.fs.clone(), false, cx);
+            #[cfg(feature = "ai")]
             project::AgentRegistryStore::init_global(
                 cx,
                 app_state.fs.clone(),
                 app_state.client.http_client(),
             );
+            #[cfg(feature = "ai")]
             agent_ui::init(
                 app_state.fs.clone(),
                 app_state.client.clone(),
@@ -6004,7 +6012,15 @@ mod tests {
             window: window_a, ..
         } = cx
             .update(|cx| {
-                Workspace::new_local(vec![dir1.into()], app_state.clone(), None, None, None, cx)
+                Workspace::new_local(
+                    vec![dir1.into()],
+                    app_state.clone(),
+                    None,
+                    None,
+                    None,
+                    true,
+                    cx,
+                )
             })
             .await
             .expect("failed to open first workspace");
@@ -6022,7 +6038,15 @@ mod tests {
             window: window_b, ..
         } = cx
             .update(|cx| {
-                Workspace::new_local(vec![dir3.into()], app_state.clone(), None, None, None, cx)
+                Workspace::new_local(
+                    vec![dir3.into()],
+                    app_state.clone(),
+                    None,
+                    None,
+                    None,
+                    true,
+                    cx,
+                )
             })
             .await
             .expect("failed to open third workspace");

@@ -131,23 +131,11 @@ impl MultiWorkspace {
         let quit_subscription = cx.on_app_quit(Self::app_will_quit);
         let settings_subscription =
             cx.observe_global_in::<settings::SettingsStore>(window, |this, window, cx| {
-                if DisableAiSettings::get_global(cx).disable_ai && this.sidebar_open {
+                if this.sidebar_open && !this.multi_workspace_enabled(cx) {
                     this.close_sidebar(window, cx);
                 }
             });
         Self::subscribe_to_workspace(&workspace, cx);
-
-        #[allow(unused_mut)]
-        let mut subscriptions = vec![release_subscription, quit_subscription];
-        #[cfg(feature = "ai")]
-        subscriptions.push(cx.observe_global_in::<settings::SettingsStore>(
-            window,
-            |this, window, cx| {
-                if DisableAiSettings::get_global(cx).disable_ai && this.sidebar_open {
-                    this.close_sidebar(window, cx);
-                }
-            },
-        ));
 
         Self {
             window_id: window.window_handle().window_id(),
@@ -184,8 +172,14 @@ impl MultiWorkspace {
             .map_or(false, |s| s.has_notifications(cx))
     }
 
+    #[cfg(feature = "ai")]
     pub fn multi_workspace_enabled(&self, cx: &App) -> bool {
         cx.has_flag::<AgentV2FeatureFlag>() && !DisableAiSettings::get_global(cx).disable_ai
+    }
+
+    #[cfg(not(feature = "ai"))]
+    pub fn multi_workspace_enabled(&self, _cx: &App) -> bool {
+        false
     }
 
     pub fn toggle_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
