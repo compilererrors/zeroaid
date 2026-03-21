@@ -24,12 +24,15 @@ ai = [
     "dep:editor",
     "dep:feature_flags",
     "dep:fs",
+    "dep:git",
     "dep:menu",
     "dep:project",
+    "dep:recent_projects",
     "dep:settings",
     "dep:theme",
     "dep:ui",
     "dep:util",
+    "dep:vim_mode_setting",
     "dep:zed_actions",
 ]
 test-support = ["ai"]
@@ -45,13 +48,16 @@ chrono = { workspace = true, optional = true }
 editor = { workspace = true, optional = true }
 feature_flags = { workspace = true, optional = true }
 fs = { workspace = true, optional = true }
+git = { workspace = true, optional = true }
 gpui.workspace = true
 menu = { workspace = true, optional = true }
 project = { workspace = true, optional = true }
+recent_projects = { workspace = true, optional = true }
 settings = { workspace = true, optional = true }
 theme = { workspace = true, optional = true }
 ui = { workspace = true, optional = true }
 util = { workspace = true, optional = true }
+vim_mode_setting = { workspace = true, optional = true }
 workspace.workspace = true
 zed_actions = { workspace = true, optional = true }
 
@@ -64,6 +70,7 @@ editor.workspace = true
 language_model = { workspace = true, features = ["test-support"] }
 pretty_assertions.workspace = true
 prompt_store.workspace = true
+recent_projects = { workspace = true, features = ["test-support"] }
 serde_json.workspace = true
 feature_flags.workspace = true
 fs = { workspace = true, features = ["test-support"] }

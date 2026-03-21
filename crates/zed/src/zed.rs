@@ -391,7 +391,7 @@ pub fn initialize_workspace(
         };
         let multi_workspace_handle = cx.entity();
         let sidebar = cx.new(|cx| Sidebar::new(multi_workspace_handle.clone(), window, cx));
-        multi_workspace.register_sidebar(sidebar);
+        multi_workspace.register_sidebar(sidebar, cx);
 
         let multi_workspace_handle = multi_workspace_handle.downgrade();
         window.on_window_should_close(cx, move |window, cx| {
@@ -411,8 +411,8 @@ pub fn initialize_workspace(
                 .update(cx, |_, window, cx| {
                     let sidebar =
                         cx.new(|cx| Sidebar::new(multi_workspace_handle.clone(), window, cx));
-                    multi_workspace_handle.update(cx, |multi_workspace, _cx| {
-                        multi_workspace.register_sidebar(sidebar);
+                    multi_workspace_handle.update(cx, |multi_workspace, cx| {
+                        multi_workspace.register_sidebar(sidebar, cx);
                     });
                 })
                 .ok();
@@ -6066,9 +6066,11 @@ mod tests {
         cx.run_until_parked();
 
         // Verify all workspaces retained their session_ids.
-        let locations = workspace::last_session_workspace_locations(&session_id, None, fs.as_ref())
-            .await
-            .expect("expected session workspace locations");
+        let db = cx.update(|cx| workspace::WorkspaceDb::global(cx));
+        let locations =
+            workspace::last_session_workspace_locations(&db, &session_id, None, fs.as_ref())
+                .await
+                .expect("expected session workspace locations");
         assert_eq!(
             locations.len(),
             3,
@@ -6095,9 +6097,10 @@ mod tests {
         });
 
         // --- Read back from DB and verify grouping ---
-        let locations = workspace::last_session_workspace_locations(&session_id, None, fs.as_ref())
-            .await
-            .expect("expected session workspace locations");
+        let locations =
+            workspace::last_session_workspace_locations(&db, &session_id, None, fs.as_ref())
+                .await
+                .expect("expected session workspace locations");
 
         assert_eq!(locations.len(), 3, "expected 3 session workspaces");
 

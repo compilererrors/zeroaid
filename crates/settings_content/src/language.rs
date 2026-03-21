@@ -411,9 +411,8 @@ pub enum AutoIndentMode {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum SoftWrap {
-    /// Prefer a single line generally, unless an overly long line is encountered.
+    /// Never soft-wrap.
     None,
-    /// Deprecated: use None instead. Left to avoid breaking existing users' configs.
     /// Prefer a single line generally, unless an overly long line is encountered.
     PreferLine,
     /// Soft wrap lines that exceed the editor width.

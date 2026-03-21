@@ -929,6 +929,10 @@
     ///
     /// Default: false
     "tree_view": false,
+    // Whether the git panel should open on startup.
+    //
+    // Default: false
+    "starts_open": false,
     // Whether to show a badge on the git panel icon with the count of uncommitted changes.
     //
     // Default: false
@@ -1354,14 +1358,15 @@
   // How to soft-wrap long lines of text.
   // Possible values:
   //
-  // 1. Prefer a single line generally, unless an overly long line is encountered.
+  // 1. Never soft-wrap lines.
   //      "soft_wrap": "none",
-  //      "soft_wrap": "prefer_line", // (deprecated, same as "none")
-  // 2. Soft wrap lines that overflow the editor.
+  // 2. Prefer a single line generally, unless an overly long line is encountered.
+  //      "soft_wrap": "prefer_line",
+  // 3. Soft wrap lines that overflow the editor.
   //      "soft_wrap": "editor_width",
-  // 3. Soft wrap lines at the preferred line length.
+  // 4. Soft wrap lines at the preferred line length.
   //      "soft_wrap": "preferred_line_length",
-  // 4. Soft wrap lines at the preferred line length or the editor width (whichever is smaller).
+  // 5. Soft wrap lines at the preferred line length or the editor width (whichever is smaller).
   //      "soft_wrap": "bounded",
   "soft_wrap": "none",
   // The column at which to soft-wrap lines, for buffers where soft-wrap

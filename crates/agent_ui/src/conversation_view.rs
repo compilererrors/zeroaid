@@ -7,10 +7,10 @@ use acp_thread::{
 use acp_thread::{AgentConnection, Plan};
 use action_log::{ActionLog, ActionLogTelemetry, DiffStats};
 use agent::{NativeAgentServer, NativeAgentSessionList, SharedThread, ThreadStore};
-use agent_client_protocol::{self as acp, PromptCapabilities};
-use agent_servers::AgentServer;
+use agent_client_protocol as acp;
 #[cfg(test)]
 use agent_servers::AgentServerDelegate;
+use agent_servers::{AgentServer, GEMINI_TERMINAL_AUTH_METHOD_ID};
 use agent_settings::{AgentProfileId, AgentSettings};
 use anyhow::{Result, anyhow};
 use arrayvec::ArrayVec;
@@ -36,11 +36,13 @@ use gpui::{
 use language::Buffer;
 use language_model::LanguageModelRegistry;
 use markdown::{Markdown, MarkdownElement, MarkdownFont, MarkdownStyle};
+use parking_lot::RwLock;
 use project::{AgentId, AgentServerStore, Project, ProjectEntryId};
 use prompt_store::{PromptId, PromptStore};
+
+use crate::message_editor::SessionCapabilities;
 use rope::Point;
 use settings::{NotifyWhenAgentWaiting, Settings as _, SettingsStore};
-use std::cell::RefCell;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
@@ -75,7 +77,7 @@ use crate::agent_diff::AgentDiff;
 use crate::entry_view_state::{EntryViewEvent, ViewEvent};
 use crate::message_editor::{MessageEditor, MessageEditorEvent};
 use crate::profile_selector::{ProfileProvider, ProfileSelector};
-use crate::thread_metadata_store::ThreadMetadataStore;
+use crate::thread_metadata_store::SidebarThreadMetadataStore;
 use crate::ui::{AgentNotification, AgentNotificationEvent};
 use crate::{
     Agent, AgentDiffPane, AgentInitialContent, AgentPanel, AllowAlways, AllowOnce,
@@ -588,11 +590,7 @@ impl ConversationView {
         if let Some(view) = self.active_thread() {
             view.update(cx, |this, cx| {
                 this.message_editor.update(cx, |editor, cx| {
-                    editor.set_command_state(
-                        this.prompt_capabilities.clone(),
-                        this.available_commands.clone(),
-                        cx,
-                    );
+                    editor.set_session_capabilities(this.session_capabilities.clone(), cx);
                 });
             });
         }
@@ -621,32 +619,7 @@ impl ConversationView {
                 session_id: resume_session_id.clone(),
             };
         }
-        let mut worktrees = project.read(cx).visible_worktrees(cx).collect::<Vec<_>>();
-        // Pick the first non-single-file worktree for the root directory if there are any,
-        // and otherwise the parent of a single-file worktree, falling back to $HOME if there are no visible worktrees.
-        worktrees.sort_by(|l, r| {
-            l.read(cx)
-                .is_single_file()
-                .cmp(&r.read(cx).is_single_file())
-        });
-        let worktree_roots: Vec<Arc<Path>> = worktrees
-            .iter()
-            .filter_map(|worktree| {
-                let worktree = worktree.read(cx);
-                if worktree.is_single_file() {
-                    Some(worktree.abs_path().parent()?.into())
-                } else {
-                    Some(worktree.abs_path())
-                }
-            })
-            .collect();
-        let session_work_dirs = work_dirs.unwrap_or_else(|| {
-            if worktree_roots.is_empty() {
-                PathList::new(&[paths::home_dir().as_path()])
-            } else {
-                PathList::new(&worktree_roots)
-            }
-        });
+        let session_work_dirs = work_dirs.unwrap_or_else(|| project.read(cx).default_path_list(cx));
 
         let connection_entry = connection_store.update(cx, |store, cx| {
             store.request_connection(connection_key, agent.clone(), cx)
@@ -821,12 +794,12 @@ impl ConversationView {
         cx: &mut Context<Self>,
     ) -> Entity<ThreadView> {
         let agent_id = self.agent.agent_id();
-        let prompt_capabilities = Rc::new(RefCell::new(acp::PromptCapabilities::default()));
-        let available_commands = Rc::new(RefCell::new(vec![]));
+        let session_capabilities = Arc::new(RwLock::new(SessionCapabilities::new(
+            thread.read(cx).prompt_capabilities(),
+            vec![],
+        )));
 
         let action_log = thread.read(cx).action_log().clone();
-
-        prompt_capabilities.replace(thread.read(cx).prompt_capabilities());
 
         let entry_view_state = cx.new(|_| {
             EntryViewState::new(
@@ -835,8 +808,7 @@ impl ConversationView {
                 self.thread_store.clone(),
                 history.as_ref().map(|h| h.downgrade()),
                 self.prompt_store.clone(),
-                prompt_capabilities.clone(),
-                available_commands.clone(),
+                session_capabilities.clone(),
                 self.agent.agent_id(),
             )
         });
@@ -995,8 +967,7 @@ impl ConversationView {
                 model_selector,
                 profile_selector,
                 list_state,
-                prompt_capabilities,
-                available_commands,
+                session_capabilities,
                 resumed_without_history,
                 self.project.downgrade(),
                 self.thread_store.clone(),
@@ -1411,8 +1382,9 @@ impl ConversationView {
                 if let Some(active) = self.thread_view(&thread_id) {
                     active.update(cx, |active, _cx| {
                         active
-                            .prompt_capabilities
-                            .replace(thread.read(_cx).prompt_capabilities());
+                            .session_capabilities
+                            .write()
+                            .set_prompt_capabilities(thread.read(_cx).prompt_capabilities());
                     });
                 }
             }
@@ -1437,7 +1409,10 @@ impl ConversationView {
                 let has_commands = !available_commands.is_empty();
                 if let Some(active) = self.active_thread() {
                     active.update(cx, |active, _cx| {
-                        active.available_commands.replace(available_commands);
+                        active
+                            .session_capabilities
+                            .write()
+                            .set_available_commands(available_commands);
                     });
                 }
 
@@ -1475,6 +1450,9 @@ impl ConversationView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let Some(workspace) = self.workspace.upgrade() else {
+            return;
+        };
         let Some(connected) = self.as_connected_mut() else {
             return;
         };
@@ -1491,119 +1469,65 @@ impl ConversationView {
 
         let agent_telemetry_id = connection.telemetry_id();
 
-        // Check for the experimental "terminal-auth" _meta field
-        let auth_method = connection.auth_methods().iter().find(|m| m.id() == &method);
+        if let Some(login) = connection.terminal_auth_task(&method, cx) {
+            configuration_view.take();
+            pending_auth_method.replace(method.clone());
 
-        if let Some(terminal_auth) = auth_method
-            .and_then(|a| match a {
-                acp::AuthMethod::EnvVar(env_var) => env_var.meta.as_ref(),
-                acp::AuthMethod::Terminal(terminal) => terminal.meta.as_ref(),
-                acp::AuthMethod::Agent(agent) => agent.meta.as_ref(),
-                _ => None,
-            })
-            .and_then(|m| m.get("terminal-auth"))
-        {
-            // Extract terminal auth details from meta
-            if let (Some(command), Some(label)) = (
-                terminal_auth.get("command").and_then(|v| v.as_str()),
-                terminal_auth.get("label").and_then(|v| v.as_str()),
-            ) {
-                let args = terminal_auth
-                    .get("args")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|v| v.as_str().map(String::from))
-                            .collect()
-                    })
-                    .unwrap_or_default();
+            let project = self.project.clone();
+            let authenticate = Self::spawn_external_agent_login(
+                login,
+                workspace,
+                project,
+                method.clone(),
+                false,
+                window,
+                cx,
+            );
+            cx.notify();
+            self.auth_task = Some(cx.spawn_in(window, {
+                async move |this, cx| {
+                    let result = authenticate.await;
 
-                let env = terminal_auth
-                    .get("env")
-                    .and_then(|v| v.as_object())
-                    .map(|obj| {
-                        obj.iter()
-                            .filter_map(|(k, v)| v.as_str().map(|val| (k.clone(), val.to_string())))
-                            .collect::<HashMap<String, String>>()
-                    })
-                    .unwrap_or_default();
-
-                // Build SpawnInTerminal from _meta
-                let login = task::SpawnInTerminal {
-                    id: task::TaskId(format!("external-agent-{}-login", label)),
-                    full_label: label.to_string(),
-                    label: label.to_string(),
-                    command: Some(command.to_string()),
-                    args,
-                    command_label: label.to_string(),
-                    env,
-                    use_new_terminal: true,
-                    allow_concurrent_runs: true,
-                    hide: task::HideStrategy::Always,
-                    ..Default::default()
-                };
-
-                configuration_view.take();
-                pending_auth_method.replace(method.clone());
-
-                if let Some(workspace) = self.workspace.upgrade() {
-                    let project = self.project.clone();
-                    let authenticate = Self::spawn_external_agent_login(
-                        login,
-                        workspace,
-                        project,
-                        method.clone(),
-                        false,
-                        window,
-                        cx,
-                    );
-                    cx.notify();
-                    self.auth_task = Some(cx.spawn_in(window, {
-                        async move |this, cx| {
-                            let result = authenticate.await;
-
-                            match &result {
-                                Ok(_) => telemetry::event!(
-                                    "Authenticate Agent Succeeded",
-                                    agent = agent_telemetry_id
-                                ),
-                                Err(_) => {
-                                    telemetry::event!(
-                                        "Authenticate Agent Failed",
-                                        agent = agent_telemetry_id,
-                                    )
-                                }
-                            }
-
-                            this.update_in(cx, |this, window, cx| {
-                                if let Err(err) = result {
-                                    if let Some(ConnectedServerState {
-                                        auth_state:
-                                            AuthState::Unauthenticated {
-                                                pending_auth_method,
-                                                ..
-                                            },
-                                        ..
-                                    }) = this.as_connected_mut()
-                                    {
-                                        pending_auth_method.take();
-                                    }
-                                    if let Some(active) = this.active_thread() {
-                                        active.update(cx, |active, cx| {
-                                            active.handle_thread_error(err, cx);
-                                        })
-                                    }
-                                } else {
-                                    this.reset(window, cx);
-                                }
-                                this.auth_task.take()
-                            })
-                            .ok();
+                    match &result {
+                        Ok(_) => telemetry::event!(
+                            "Authenticate Agent Succeeded",
+                            agent = agent_telemetry_id
+                        ),
+                        Err(_) => {
+                            telemetry::event!(
+                                "Authenticate Agent Failed",
+                                agent = agent_telemetry_id,
+                            )
                         }
-                    }));
+                    }
+
+                    this.update_in(cx, |this, window, cx| {
+                        if let Err(err) = result {
+                            if let Some(ConnectedServerState {
+                                auth_state:
+                                    AuthState::Unauthenticated {
+                                        pending_auth_method,
+                                        ..
+                                    },
+                                ..
+                            }) = this.as_connected_mut()
+                            {
+                                pending_auth_method.take();
+                            }
+                            if let Some(active) = this.active_thread() {
+                                active.update(cx, |active, cx| {
+                                    active.handle_thread_error(err, cx);
+                                })
+                            }
+                        } else {
+                            this.reset(window, cx);
+                        }
+                        this.auth_task.take()
+                    })
+                    .ok();
                 }
-                return;
-            }
+            }));
+            return;
         }
 
         configuration_view.take();
@@ -1675,7 +1599,7 @@ impl ConversationView {
             .read(cx)
             .work_dirs()
             .cloned()
-            .unwrap_or_else(|| PathList::new(&[paths::home_dir().as_path()]));
+            .unwrap_or_else(|| self.project.read(cx).default_path_list(cx));
 
         let subagent_thread_task = connected.connection.clone().load_session(
             subagent_id.clone(),
@@ -1726,7 +1650,7 @@ impl ConversationView {
         cx: &mut App,
     ) -> Task<Result<()>> {
         let Some(terminal_panel) = workspace.read(cx).panel::<TerminalPanel>(cx) else {
-            return Task::ready(Ok(()));
+            return Task::ready(Err(anyhow!("Terminal panel is unavailable")));
         };
 
         window.spawn(cx, async move |cx| {
@@ -1734,17 +1658,14 @@ impl ConversationView {
             if let Some(cmd) = &task.command {
                 // Have "node" command use Zed's managed Node runtime by default
                 if cmd == "node" {
-                    let resolved_node_runtime = project
-                        .update(cx, |project, cx| {
-                            let agent_server_store = project.agent_server_store().clone();
-                            agent_server_store.update(cx, |store, cx| {
-                                store.node_runtime().map(|node_runtime| {
-                                    cx.background_spawn(async move {
-                                        node_runtime.binary_path().await
-                                    })
-                                })
+                    let resolved_node_runtime = project.update(cx, |project, cx| {
+                        let agent_server_store = project.agent_server_store().clone();
+                        agent_server_store.update(cx, |store, cx| {
+                            store.node_runtime().map(|node_runtime| {
+                                cx.background_spawn(async move { node_runtime.binary_path().await })
                             })
-                        });
+                        })
+                    });
 
                     if let Some(resolve_task) = resolved_node_runtime {
                         if let Ok(node_path) = resolve_task.await {
@@ -1756,14 +1677,8 @@ impl ConversationView {
             task.shell = task::Shell::WithArguments {
                 program: task.command.take().expect("login command should be set"),
                 args: std::mem::take(&mut task.args),
-                title_override: None
+                title_override: None,
             };
-            task.full_label = task.label.clone();
-            task.id = task::TaskId(format!("external-agent-{}-login", task.label));
-            task.command_label = task.label.clone();
-            task.use_new_terminal = true;
-            task.allow_concurrent_runs = true;
-            task.hide = task::HideStrategy::Always;
 
             let terminal = terminal_panel
                 .update_in(cx, |terminal_panel, window, cx| {
@@ -1772,7 +1687,7 @@ impl ConversationView {
                 .await?;
 
             let success_patterns = match method.0.as_ref() {
-                "claude-login" | "spawn-gemini-cli" => vec![
+                "claude-login" | GEMINI_TERMINAL_AUTH_METHOD_ID => vec![
                     "Login successful".to_string(),
                     "Type your message".to_string(),
                 ],
@@ -1806,7 +1721,9 @@ impl ConversationView {
                                 cx.background_executor().timer(Duration::from_secs(1)).await;
                                 let content =
                                     terminal.update(cx, |terminal, _cx| terminal.get_content())?;
-                                if success_patterns.iter().any(|pattern| content.contains(pattern))
+                                if success_patterns
+                                    .iter()
+                                    .any(|pattern| content.contains(pattern))
                                 {
                                     return anyhow::Ok(());
                                 }
@@ -1823,8 +1740,23 @@ impl ConversationView {
                         }
                     }
                     _ = exit_status => {
-                        if !previous_attempt && project.read_with(cx, |project, _| project.is_via_remote_server()) && login.label.contains("gemini") {
-                            return cx.update(|window, cx| Self::spawn_external_agent_login(login, workspace, project.clone(), method, true, window, cx))?.await
+                        if !previous_attempt
+                            && project.read_with(cx, |project, _| project.is_via_remote_server())
+                            && method.0.as_ref() == GEMINI_TERMINAL_AUTH_METHOD_ID
+                        {
+                            return cx
+                                .update(|window, cx| {
+                                    Self::spawn_external_agent_login(
+                                        login,
+                                        workspace,
+                                        project.clone(),
+                                        method,
+                                        true,
+                                        window,
+                                        cx,
+                                    )
+                                })?
+                                .await;
                         }
                         return Err(anyhow!("exited before logging in"));
                     }
@@ -2217,8 +2149,7 @@ impl ConversationView {
         let Some(thread) = connected.active_view() else {
             return;
         };
-        let prompt_capabilities = thread.read(cx).prompt_capabilities.clone();
-        let available_commands = thread.read(cx).available_commands.clone();
+        let session_capabilities = thread.read(cx).session_capabilities.clone();
 
         let current_count = thread.read(cx).queued_message_editors.len();
         let last_synced = thread.read(cx).last_synced_queue_length;
@@ -2257,8 +2188,7 @@ impl ConversationView {
                     None,
                     history.clone(),
                     None,
-                    prompt_capabilities.clone(),
-                    available_commands.clone(),
+                    session_capabilities.clone(),
                     agent_name.clone(),
                     "",
                     EditorMode::AutoHeight {
@@ -2615,7 +2545,7 @@ impl ConversationView {
         let task = history.update(cx, |history, cx| history.delete_session(&session_id, cx));
         task.detach_and_log_err(cx);
 
-        if let Some(store) = ThreadMetadataStore::try_global(cx) {
+        if let Some(store) = SidebarThreadMetadataStore::try_global(cx) {
             store
                 .update(cx, |store, cx| store.delete(session_id.clone(), cx))
                 .detach_and_log_err(cx);
@@ -3696,6 +3626,7 @@ pub(crate) mod tests {
         fn connect(
             &self,
             _delegate: AgentServerDelegate,
+            _project: Entity<Project>,
             _cx: &mut App,
         ) -> Task<gpui::Result<Rc<dyn AgentConnection>>> {
             Task::ready(Ok(Rc::new(self.connection.clone())))
@@ -3720,6 +3651,7 @@ pub(crate) mod tests {
         fn connect(
             &self,
             _delegate: AgentServerDelegate,
+            _project: Entity<Project>,
             _cx: &mut App,
         ) -> Task<gpui::Result<Rc<dyn AgentConnection>>> {
             Task::ready(Err(anyhow!(
@@ -4291,7 +4223,7 @@ pub(crate) mod tests {
         cx.update(|cx| {
             let settings_store = SettingsStore::test(cx);
             cx.set_global(settings_store);
-            ThreadMetadataStore::init_global(cx);
+            SidebarThreadMetadataStore::init_global(cx);
             theme::init(theme::LoadThemes::JustBase, cx);
             editor::init(cx);
             agent_panel::init(cx);

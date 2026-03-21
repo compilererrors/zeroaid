@@ -44,10 +44,11 @@ ui.workspace = true
 util.workspace = true
 
 [target.'cfg(not(any(all(target_os = "windows", target_env = "gnu"), target_os = "freebsd")))'.dependencies]
-libwebrtc = { rev = "37835f840d0070d45ac8b31cce6a6ae7aca3f459", git = "https://github.com/zed-industries/livekit-rust-sdks" }
-livekit = { rev = "37835f840d0070d45ac8b31cce6a6ae7aca3f459", git = "https://github.com/zed-industries/livekit-rust-sdks", features = [
-    "__rustls-tls"
-] }
+libwebrtc.workspace = true
+livekit.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tokio = { workspace = true, features = ["time"] }
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "windows"))'.dependencies]
 scap.workspace = true
