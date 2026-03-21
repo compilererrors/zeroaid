@@ -25,6 +25,8 @@ More areas may be trimmed over time if they are not needed for the core editor w
 - Collaboration/calls/audio settings pages are hidden when `collab` is not enabled.
 - Title bar initialization remains enabled so the top bar/UI does not disappear in lean builds.
 - Support to show invisible chars and control chars, editable through menu under `Whitespace`.
+- `soft_wrap = "none"` now fully disables wrapping across file types, including very long log lines.
+- Horizontal scrolling on very long lines now uses pixel-snapped render offsets for text and invisible symbols, reducing blur and jitter while panning.
 
 ### Build Behavior (Important)
 
