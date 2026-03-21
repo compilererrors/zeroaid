@@ -9073,7 +9073,8 @@ impl LineWithInvisibles {
             Cow::Borrowed(text_style)
         };
 
-        if line.len() > max_line_len.saturating_sub(line_chunk.len()) {
+        let should_limit_line_len = max_line_len != usize::MAX && is_row_soft_wrapped(row);
+        if should_limit_line_len && line.len() > max_line_len.saturating_sub(line_chunk.len()) {
             let mut chunk_len = max_line_len.saturating_sub(line.len());
             if chunk_len == 0 {
                 *line_exceeded_max_len = true;
@@ -10491,17 +10492,25 @@ impl Element for EditorElement {
                         })
                         .unwrap_or(Pixels::ZERO);
 
+                    let longest_row = snapshot.longest_row();
+                    let longest_row_is_soft_wrapped =
+                        snapshot.soft_wrap_indent(longest_row).is_some();
                     let longest_line_width = layout_line(
-                        snapshot.longest_row(),
+                        longest_row,
                         &snapshot,
                         style,
                         max_line_len,
                         editor_width,
-                        is_row_soft_wrapped,
+                        move |_| longest_row_is_soft_wrapped,
                         window,
                         cx,
                     )
-                    .width;
+                    .width
+                    .max(
+                        line_layouts
+                            .iter()
+                            .fold(Pixels::ZERO, |width, line| width.max(line.width)),
+                    );
 
                     let scrollbar_layout_information = ScrollbarLayoutInformation::new(
                         text_hitbox.bounds,
@@ -12617,14 +12626,8 @@ fn calculate_wrap_width(
 }
 
 fn max_render_line_len(soft_wrap: SoftWrap) -> usize {
-    match soft_wrap {
-        SoftWrap::None => usize::MAX,
-        SoftWrap::GitDiff
-        | SoftWrap::PreferLine
-        | SoftWrap::EditorWidth
-        | SoftWrap::Column(_)
-        | SoftWrap::Bounded(_) => MAX_LINE_LEN,
-    }
+    let _ = soft_wrap;
+    usize::MAX
 }
 
 fn compute_auto_height_layout(
@@ -12757,6 +12760,37 @@ mod tests {
                 "Soft wrapped editor should have no horizontal scrolling!"
             );
         }
+    }
+
+    #[gpui::test]
+    async fn test_soft_wrap_none_does_not_cap_long_line_rendering(cx: &mut TestAppContext) {
+        init_test(cx, |_| {});
+        let window = cx.add_window(|window, cx| {
+            let buffer = MultiBuffer::build_simple(&"a".repeat(MAX_LINE_LEN * 2), cx);
+            let mut editor = Editor::new(EditorMode::full(), buffer, None, window, cx);
+            editor.set_soft_wrap_mode(language_settings::SoftWrap::None, cx);
+            editor
+        });
+        let cx = &mut VisualTestContext::from_window(*window, cx);
+        let editor = window.root(cx).unwrap();
+        let style = cx.update(|_, cx| editor.update(cx, |editor, cx| editor.style(cx).clone()));
+
+        let (_, state) = cx.draw(Default::default(), size(px(300.), px(200.)), |_, _| {
+            EditorElement::new(&editor, style.clone())
+        });
+
+        assert!(
+            !state.position_map.line_layouts.is_empty(),
+            "Expected at least one visible line layout for a non-empty buffer"
+        );
+        assert!(
+            state.position_map.line_layouts[0].len > MAX_LINE_LEN,
+            "Long lines should not be capped at MAX_LINE_LEN when soft wrap is disabled"
+        );
+        assert!(
+            state.position_map.scroll_max.x > MAX_LINE_LEN as f64,
+            "Horizontal scrolling range should include the full unwrapped line width"
+        );
     }
 
     #[gpui::test]

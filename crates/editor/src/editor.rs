@@ -9792,6 +9792,13 @@ impl Editor {
 
         let longest_row =
             editor_snapshot.longest_row_in_range(edit_start.row()..edit_end.row() + 1);
+        let max_line_len = match self.soft_wrap_mode(cx) {
+            SoftWrap::None | SoftWrap::GitDiff => usize::MAX,
+            SoftWrap::PreferLine
+            | SoftWrap::EditorWidth
+            | SoftWrap::Column(_)
+            | SoftWrap::Bounded(_) => MAX_LINE_LEN,
+        };
         let longest_line_width = if visible_row_range.contains(&longest_row) {
             line_layouts[(longest_row.0 - visible_row_range.start.0) as usize].width
         } else {
@@ -9799,7 +9806,7 @@ impl Editor {
                 longest_row,
                 editor_snapshot,
                 style,
-                MAX_LINE_LEN,
+                max_line_len,
                 editor_width,
                 |_| false,
                 window,
