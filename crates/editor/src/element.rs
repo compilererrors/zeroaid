@@ -3768,6 +3768,7 @@ impl EditorElement {
         rows: Range<DisplayRow>,
         snapshot: &EditorSnapshot,
         style: &EditorStyle,
+        max_line_len: usize,
         editor_width: Pixels,
         is_row_soft_wrapped: impl Copy + Fn(usize) -> bool,
         bg_segments_per_row: &[Vec<(Range<DisplayPoint>, Hsla)>],
@@ -3824,7 +3825,7 @@ impl EditorElement {
             LineWithInvisibles::from_chunks(
                 chunks,
                 style,
-                MAX_LINE_LEN,
+                max_line_len,
                 rows.len(),
                 &snapshot.mode,
                 editor_width,
@@ -3885,6 +3886,7 @@ impl EditorElement {
         em_width: Pixels,
         text_hitbox: &Hitbox,
         editor_width: Pixels,
+        max_line_len: usize,
         scroll_width: &mut Pixels,
         resized_blocks: &mut HashMap<CustomBlockId, u32>,
         row_block_types: &mut HashMap<DisplayRow, bool>,
@@ -3922,6 +3924,7 @@ impl EditorElement {
                             align_to.row(),
                             snapshot,
                             &self.style,
+                            max_line_len,
                             editor_width,
                             is_row_soft_wrapped,
                             window,
@@ -4223,6 +4226,7 @@ impl EditorElement {
         hitbox: &Hitbox,
         text_hitbox: &Hitbox,
         editor_width: Pixels,
+        max_line_len: usize,
         scroll_width: &mut Pixels,
         editor_margins: &EditorMargins,
         em_width: Pixels,
@@ -4273,6 +4277,7 @@ impl EditorElement {
                 em_width,
                 text_hitbox,
                 editor_width,
+                max_line_len,
                 scroll_width,
                 &mut resized_blocks,
                 &mut row_block_types,
@@ -4341,6 +4346,7 @@ impl EditorElement {
                 em_width,
                 text_hitbox,
                 editor_width,
+                max_line_len,
                 scroll_width,
                 &mut resized_blocks,
                 &mut row_block_types,
@@ -4409,6 +4415,7 @@ impl EditorElement {
                 em_width,
                 text_hitbox,
                 editor_width,
+                max_line_len,
                 scroll_width,
                 &mut resized_blocks,
                 &mut row_block_types,
@@ -4584,6 +4591,7 @@ impl EditorElement {
     fn layout_sticky_headers(
         &self,
         snapshot: &EditorSnapshot,
+        max_line_len: usize,
         editor_width: Pixels,
         is_row_soft_wrapped: impl Copy + Fn(usize) -> bool,
         line_height: Pixels,
@@ -4615,6 +4623,7 @@ impl EditorElement {
                 sticky_row,
                 snapshot,
                 &self.style,
+                max_line_len,
                 editor_width,
                 is_row_soft_wrapped,
                 window,
@@ -9064,8 +9073,12 @@ impl LineWithInvisibles {
             Cow::Borrowed(text_style)
         };
 
-        if line.len() + line_chunk.len() > max_line_len {
-            let mut chunk_len = max_line_len - line.len();
+        if line.len() > max_line_len.saturating_sub(line_chunk.len()) {
+            let mut chunk_len = max_line_len.saturating_sub(line.len());
+            if chunk_len == 0 {
+                *line_exceeded_max_len = true;
+                return;
+            }
             while !line_chunk.is_char_boundary(chunk_len) {
                 chunk_len -= 1;
             }
@@ -10409,11 +10422,13 @@ impl Element for EditorElement {
                         &merged_highlighted_ranges,
                         self.style.background,
                     );
+                    let max_line_len = max_render_line_len(self.editor.read(cx).soft_wrap_mode(cx));
 
                     let mut line_layouts = Self::layout_lines(
                         start_row..end_row,
                         &snapshot,
                         &self.style,
+                        max_line_len,
                         editor_width,
                         is_row_soft_wrapped,
                         &bg_segments_per_row,
@@ -10480,6 +10495,7 @@ impl Element for EditorElement {
                         snapshot.longest_row(),
                         &snapshot,
                         style,
+                        max_line_len,
                         editor_width,
                         is_row_soft_wrapped,
                         window,
@@ -10537,6 +10553,7 @@ impl Element for EditorElement {
                                     &hitbox,
                                     &text_hitbox,
                                     editor_width,
+                                    max_line_len,
                                     &mut scroll_width,
                                     &editor_margins,
                                     em_width,
@@ -10647,6 +10664,7 @@ impl Element for EditorElement {
                         let relative = self.editor.read(cx).relative_line_numbers(cx);
                         self.layout_sticky_headers(
                             &snapshot,
+                            max_line_len,
                             editor_width,
                             is_row_soft_wrapped,
                             line_height,
@@ -12224,6 +12242,7 @@ pub fn layout_line(
     row: DisplayRow,
     snapshot: &EditorSnapshot,
     style: &EditorStyle,
+    max_line_len: usize,
     text_width: Pixels,
     is_row_soft_wrapped: impl Copy + Fn(usize) -> bool,
     window: &mut Window,
@@ -12235,7 +12254,7 @@ pub fn layout_line(
     LineWithInvisibles::from_chunks(
         chunks,
         style,
-        MAX_LINE_LEN,
+        max_line_len,
         1,
         &snapshot.mode,
         text_width,
@@ -12594,6 +12613,17 @@ fn calculate_wrap_width(
         SoftWrap::EditorWidth => Some(editor_width),
         SoftWrap::Column(column) => Some(wrap_width_for(column)),
         SoftWrap::Bounded(column) => Some(editor_width.min(wrap_width_for(column))),
+    }
+}
+
+fn max_render_line_len(soft_wrap: SoftWrap) -> usize {
+    match soft_wrap {
+        SoftWrap::None => usize::MAX,
+        SoftWrap::GitDiff
+        | SoftWrap::PreferLine
+        | SoftWrap::EditorWidth
+        | SoftWrap::Column(_)
+        | SoftWrap::Bounded(_) => MAX_LINE_LEN,
     }
 }
 

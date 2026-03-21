@@ -9799,6 +9799,7 @@ impl Editor {
                 longest_row,
                 editor_snapshot,
                 style,
+                MAX_LINE_LEN,
                 editor_width,
                 |_| false,
                 window,
