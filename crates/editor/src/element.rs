@@ -9232,8 +9232,9 @@ impl LineWithInvisibles {
         window: &mut Window,
         cx: &mut App,
     ) {
+        let render_scroll_x = scroll_pixel_position.x.round();
         let mut fragment_origin =
-            content_origin + gpui::point(Pixels::from(-scroll_pixel_position.x), line_y);
+            content_origin + gpui::point(Pixels::from(-render_scroll_x), line_y);
         for fragment in &mut self.fragments {
             match fragment {
                 LineFragment::Text(line) => {
@@ -9291,11 +9292,9 @@ impl LineWithInvisibles {
         cx: &mut App,
     ) {
         let line_height = layout.position_map.line_height;
+        let render_scroll_x = layout.position_map.scroll_pixel_position.x.round();
         let mut fragment_origin = content_origin
-            + gpui::point(
-                Pixels::from(-layout.position_map.scroll_pixel_position.x),
-                line_y,
-            );
+            + gpui::point(Pixels::from(-render_scroll_x), line_y);
 
         for fragment in &self.fragments {
             match fragment {
@@ -9340,12 +9339,10 @@ impl LineWithInvisibles {
     ) {
         let line_height = layout.position_map.line_height;
         let line_y = line_height * (row.as_f64() - layout.position_map.scroll_position.y) as f32;
+        let render_scroll_x = layout.position_map.scroll_pixel_position.x.round();
 
         let mut fragment_origin = content_origin
-            + gpui::point(
-                Pixels::from(-layout.position_map.scroll_pixel_position.x),
-                line_y,
-            );
+            + gpui::point(Pixels::from(-render_scroll_x), line_y);
 
         for fragment in &self.fragments {
             match fragment {
@@ -9380,6 +9377,7 @@ impl LineWithInvisibles {
         window: &mut Window,
         cx: &mut App,
     ) {
+        let render_scroll_x = layout.position_map.scroll_pixel_position.x.round();
         let extract_whitespace_info = |invisible: &Invisible| {
             let (token_offset, token_end_offset, invisible_symbol, origin_x) = match invisible {
                 Invisible::Tab {
@@ -9396,10 +9394,7 @@ impl LineWithInvisibles {
                         *line_start_offset,
                         *line_end_offset,
                         &layout.tab_invisible,
-                        Pixels::from(
-                            x_offset + invisible_offset
-                                - layout.position_map.scroll_pixel_position.x,
-                        ),
+                        Pixels::from(x_offset + invisible_offset - render_scroll_x),
                     )
                 }
                 Invisible::Whitespace { line_offset } => {
@@ -9413,10 +9408,7 @@ impl LineWithInvisibles {
                         *line_offset,
                         line_offset + 1,
                         &layout.space_invisible,
-                        Pixels::from(
-                            x_offset + invisible_offset
-                                - layout.position_map.scroll_pixel_position.x,
-                        ),
+                        Pixels::from(x_offset + invisible_offset - render_scroll_x),
                     )
                 }
                 Invisible::CarriageReturn { line_offset } => {
@@ -9425,7 +9417,7 @@ impl LineWithInvisibles {
                         *line_offset,
                         *line_offset,
                         &layout.carriage_return_invisible,
-                        Pixels::from(x_offset - layout.position_map.scroll_pixel_position.x)
+                        Pixels::from(x_offset - render_scroll_x)
                             - layout.carriage_return_invisible.width,
                     )
                 }
@@ -9435,7 +9427,7 @@ impl LineWithInvisibles {
                         *line_offset,
                         *line_offset,
                         &layout.end_of_line_invisible,
-                        Pixels::from(x_offset - layout.position_map.scroll_pixel_position.x),
+                        Pixels::from(x_offset - render_scroll_x),
                     )
                 }
             };
