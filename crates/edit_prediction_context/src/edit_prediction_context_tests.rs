@@ -534,6 +534,7 @@ fn assert_related_files(actual_files: &[RelatedFile], expected_files: &[(&str, &
     pretty_assertions::assert_eq!(actual_files, expected_excerpts)
 }
 
+#[track_caller]
 fn assert_definitions(definitions: &[LocationLink], first_lines: &[&str], cx: &mut TestAppContext) {
     let actual_first_lines = definitions
         .iter()

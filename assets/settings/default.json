@@ -467,6 +467,8 @@
     "show_sign_in": true,
     // Whether to show the menus in the titlebar.
     "show_menus": false,
+    // The layout of window control buttons in the title bar (Linux only).
+    "button_layout": "platform_default",
   },
   "audio": {
     // Opt into the new audio system.
@@ -1080,6 +1082,7 @@
           "spawn_agent": true,
           "terminal": true,
           "thinking": true,
+          "update_plan": true,
           "web_search": true,
         },
       },
@@ -1099,6 +1102,7 @@
           "grep": true,
           "spawn_agent": true,
           "thinking": true,
+          "update_plan": true,
           "web_search": true,
         },
       },
@@ -2248,6 +2252,9 @@
       "api_url": "https://api.openai.com/v1",
     },
     "openai_compatible": {},
+    "opencode": {
+      "api_url": "https://opencode.ai/zen",
+    },
     "open_router": {
       "api_url": "https://openrouter.ai/api/v1",
     },
