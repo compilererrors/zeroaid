@@ -639,6 +639,9 @@
   "overlay_defer_after_scroll": 120,
   // Time to keep expensive text styling (syntax/semantic highlighting) deferred after a scroll event, in milliseconds.
   "text_styling_defer_after_scroll": 1000,
+  // Enable large-file optimization mode when a singleton buffer reaches this size, in megabytes.
+  // Set to 0 to disable.
+  "large_file_optimization_threshold_mb": 20,
   "sticky_scroll": {
     // Whether to stick scopes to the top of the editor.
     "enabled": false,

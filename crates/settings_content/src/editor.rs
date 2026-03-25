@@ -104,6 +104,13 @@ pub struct EditorSettingsContent {
     ///
     /// Default: 1000
     pub text_styling_defer_after_scroll: Option<DelayMs>,
+    /// Enable large-file optimization mode when a singleton buffer reaches this size, in megabytes.
+    ///
+    /// When active, expensive text styling and non-essential overlays are deferred to reduce
+    /// memory and render pressure while navigating large files.
+    ///
+    /// Default: 20
+    pub large_file_optimization_threshold_mb: Option<usize>,
     /// Settings for sticking scopes to the top of the editor.
     ///
     /// Default: sticky scroll is disabled

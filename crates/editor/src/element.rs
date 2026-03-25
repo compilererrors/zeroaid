@@ -10097,13 +10097,26 @@ impl Element for EditorElement {
                         )
                     };
 
+                    let editor_settings = EditorSettings::get_global(cx);
+                    let large_file_optimization_threshold_bytes = editor_settings
+                        .large_file_optimization_threshold_mb
+                        .checked_mul(1024)
+                        .and_then(|size_kb| size_kb.checked_mul(1024))
+                        .unwrap_or(usize::MAX);
+                    let large_file_optimization_active = large_file_optimization_threshold_bytes
+                        > 0
+                        && is_singleton
+                        && snapshot.buffer_snapshot().len().0
+                            >= large_file_optimization_threshold_bytes;
+
                     let scroll_manager = &self.editor.read(cx).scroll_manager;
-                    let defer_expensive_text_styling =
-                        scroll_manager.defer_expensive_text_styling();
+                    let defer_expensive_text_styling = large_file_optimization_active
+                        || scroll_manager.defer_expensive_text_styling();
                     let defer_non_essential_overlays = if is_minimap {
                         false
                     } else {
-                        scroll_manager.defer_non_essential_overlays()
+                        large_file_optimization_active
+                            || scroll_manager.defer_non_essential_overlays()
                     };
 
                     let mut highlighted_rows = if defer_non_essential_overlays {

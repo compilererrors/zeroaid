@@ -36,6 +36,7 @@ pub struct EditorSettings {
     pub fast_scroll_sensitivity: f32,
     pub overlay_defer_after_scroll: DelayMs,
     pub text_styling_defer_after_scroll: DelayMs,
+    pub large_file_optimization_threshold_mb: usize,
     pub sticky_scroll: StickyScroll,
     pub relative_line_numbers: RelativeLineNumbers,
     pub seed_search_query_from_cursor: SeedQuerySetting,
@@ -261,6 +262,9 @@ impl Settings for EditorSettings {
             fast_scroll_sensitivity: editor.fast_scroll_sensitivity.unwrap(),
             overlay_defer_after_scroll: editor.overlay_defer_after_scroll.unwrap(),
             text_styling_defer_after_scroll: editor.text_styling_defer_after_scroll.unwrap(),
+            large_file_optimization_threshold_mb: editor
+                .large_file_optimization_threshold_mb
+                .unwrap(),
             sticky_scroll: StickyScroll {
                 enabled: sticky_scroll.enabled.unwrap(),
             },
