@@ -201,6 +201,10 @@ pub struct ScrollManager {
     /// Each side separately clamps the x component using its own scroll_max_x when reading from the SharedScrollAnchor.
     scroll_max_x: Option<f64>,
     ongoing: OngoingScroll,
+    defer_non_essential_overlays: bool,
+    defer_expensive_text_styling: bool,
+    clear_overlay_defer_task: Option<Task<()>>,
+    clear_text_styling_defer_task: Option<Task<()>>,
     /// Number of sticky header lines currently being rendered for the current scroll position.
     sticky_header_line_count: usize,
     /// The second element indicates whether the autoscroll request is local
@@ -234,6 +238,10 @@ impl ScrollManager {
             anchor,
             scroll_max_x: None,
             ongoing: OngoingScroll::new(),
+            defer_non_essential_overlays: false,
+            defer_expensive_text_styling: false,
+            clear_overlay_defer_task: None,
+            clear_text_styling_defer_task: None,
             sticky_header_line_count: 0,
             autoscroll_request: None,
             show_scrollbars: true,
@@ -273,6 +281,10 @@ impl ScrollManager {
             this.display_map_id = Some(my_snapshot.display_map_id);
         });
         self.ongoing = other.ongoing;
+        self.defer_non_essential_overlays = other.defer_non_essential_overlays;
+        self.defer_expensive_text_styling = other.defer_expensive_text_styling;
+        self.clear_overlay_defer_task = None;
+        self.clear_text_styling_defer_task = None;
         self.sticky_header_line_count = other.sticky_header_line_count;
     }
 
@@ -346,6 +358,63 @@ impl ScrollManager {
     pub fn update_ongoing_scroll(&mut self, axis: Option<Axis>) {
         self.ongoing.last_event = Instant::now();
         self.ongoing.axis = axis;
+    }
+
+    pub fn defer_non_essential_overlays(&self) -> bool {
+        self.defer_non_essential_overlays
+    }
+
+    pub fn defer_expensive_text_styling(&self) -> bool {
+        self.defer_expensive_text_styling
+    }
+
+    fn mark_scroll_activity(&mut self, window: &mut Window, cx: &mut Context<Editor>) {
+        let settings = EditorSettings::get_global(cx);
+        let overlay_defer_after_scroll =
+            Duration::from_millis(settings.overlay_defer_after_scroll.0);
+        let text_styling_defer_after_scroll =
+            Duration::from_millis(settings.text_styling_defer_after_scroll.0);
+
+        let mut should_notify = false;
+        if !self.defer_non_essential_overlays {
+            self.defer_non_essential_overlays = true;
+            should_notify = true;
+        }
+        if !self.defer_expensive_text_styling {
+            self.defer_expensive_text_styling = true;
+            should_notify = true;
+        }
+        if should_notify {
+            cx.notify();
+        }
+
+        self.clear_overlay_defer_task = Some(cx.spawn_in(window, async move |editor, cx| {
+            cx.background_executor()
+                .timer(overlay_defer_after_scroll)
+                .await;
+            editor
+                .update(cx, |editor, cx| {
+                    if editor.scroll_manager.defer_non_essential_overlays {
+                        editor.scroll_manager.defer_non_essential_overlays = false;
+                        cx.notify();
+                    }
+                })
+                .log_err();
+        }));
+
+        self.clear_text_styling_defer_task = Some(cx.spawn_in(window, async move |editor, cx| {
+            cx.background_executor()
+                .timer(text_styling_defer_after_scroll)
+                .await;
+            editor
+                .update(cx, |editor, cx| {
+                    if editor.scroll_manager.defer_expensive_text_styling {
+                        editor.scroll_manager.defer_expensive_text_styling = false;
+                        cx.notify();
+                    }
+                })
+                .log_err();
+        }));
     }
 
     pub fn scroll_position(
@@ -461,6 +530,7 @@ impl ScrollManager {
             shared.scroll_anchor = adjusted_anchor;
             shared.display_map_id = Some(display_map.display_map_id);
         });
+        self.mark_scroll_activity(window, cx);
         cx.emit(EditorEvent::ScrollPositionChanged { local, autoscroll });
         self.show_scrollbars(window, cx);
         if let Some(workspace_id) = workspace_id {

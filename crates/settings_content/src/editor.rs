@@ -96,6 +96,14 @@ pub struct EditorSettingsContent {
     /// Default: 4.0
     #[serde(serialize_with = "crate::serialize_optional_f32_with_two_decimal_places")]
     pub fast_scroll_sensitivity: Option<f32>,
+    /// Time to keep non-essential editor overlays deferred after a scroll event.
+    ///
+    /// Default: 120
+    pub overlay_defer_after_scroll: Option<DelayMs>,
+    /// Time to keep expensive text styling (syntax/semantic highlighting) deferred after a scroll event.
+    ///
+    /// Default: 1000
+    pub text_styling_defer_after_scroll: Option<DelayMs>,
     /// Settings for sticking scopes to the top of the editor.
     ///
     /// Default: sticky scroll is disabled

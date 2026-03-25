@@ -10016,7 +10016,8 @@ dependencies = [
  "tokio",
  "ui",
  "util",
- "webrtc-sys",
+
+å'-lbn gvfcdxs "webrtc-sys 0.3.23 (git+https://github.com/zed-industries/livekit-rust-sdks?rev=c1209aa155cbf4543383774f884a46ae7e53ee2e)",
  "zed-scap",
 ]
 

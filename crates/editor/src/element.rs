@@ -14,7 +14,7 @@ use crate::{
     column_pixels,
     display_map::{
         Block, BlockContext, BlockStyle, ChunkRendererId, DisplaySnapshot, EditorMargins,
-        HighlightKey, HighlightedChunk, ToDisplayPoint,
+        HighlightKey, HighlightStyles, HighlightedChunk, ToDisplayPoint,
     },
     editor_settings::{
         CurrentLineHighlight, DocumentColorsRenderMode, DoubleClickInMultibuffer, Minimap,
@@ -42,15 +42,14 @@ use gpui::{
     Action, Along, AnyElement, App, AppContext, AvailableSpace, Axis as ScrollbarAxis, BorderStyle,
     Bounds, ClickEvent, ClipboardItem, ContentMask, Context, Corner, Corners, CursorStyle,
     DispatchPhase, Edges, Element, ElementInputHandler, Entity, Focusable as _, Font, FontId,
-    FontWeight, GlobalElementId, HighlightStyle, Hitbox, HitboxBehavior, Hsla,
-    InteractiveElement, IntoElement,
-    IsZero, Length, Modifiers, ModifiersChangedEvent, MouseButton,
-    MouseClickEvent, MouseDownEvent, MouseMoveEvent, MousePressureEvent, MouseUpEvent, PaintQuad,
-    ParentElement, Pixels, PressureStage, ScrollDelta, ScrollHandle, ScrollWheelEvent, ShapedLine,
-    SharedString, Size, StatefulInteractiveElement, Style, Styled, StyledText, TextAlign, TextRun,
+    FontWeight, GlobalElementId, HighlightStyle, Hitbox, HitboxBehavior, Hsla, InteractiveElement,
+    IntoElement, IsZero, Length, Modifiers, ModifiersChangedEvent, MouseButton, MouseClickEvent,
+    MouseDownEvent, MouseMoveEvent, MousePressureEvent, MouseUpEvent, PaintQuad, ParentElement,
+    Pixels, PressureStage, ScrollDelta, ScrollHandle, ScrollWheelEvent, ShapedLine, SharedString,
+    Size, StatefulInteractiveElement, Style, Styled, StyledText, TextAlign, TextRun, TextStyle,
     TextStyleRefinement, WeakEntity, Window, anchored, deferred, div, fill, linear_color_stop,
     linear_gradient, outline, pattern_slash, point, px, quad, relative, size, solid_background,
-    transparent_black, TextStyle,
+    transparent_black,
 };
 use itertools::Itertools;
 use language::{HighlightedText, IndentGuideSettings, language_settings::ShowWhitespaceSetting};
@@ -3770,6 +3769,7 @@ impl EditorElement {
         style: &EditorStyle,
         max_line_len: usize,
         editor_width: Pixels,
+        defer_expensive_text_styling: bool,
         is_row_soft_wrapped: impl Copy + Fn(usize) -> bool,
         bg_segments_per_row: &[Vec<(Range<DisplayPoint>, Hsla)>],
         window: &mut Window,
@@ -3819,27 +3819,58 @@ impl EditorElement {
                 })
                 .collect()
         } else {
-            let use_tree_sitter = !snapshot.semantic_tokens_enabled
-                || snapshot.use_tree_sitter_for_syntax(rows.start, cx);
-            let chunks = snapshot.highlighted_chunks(rows.clone(), use_tree_sitter, style);
-            LineWithInvisibles::from_chunks(
-                chunks,
-                style,
-                max_line_len,
-                rows.len(),
-                &snapshot.mode,
-                editor_width,
-                is_row_soft_wrapped,
-                |row_offset| {
-                    line_ending_for_display_row(
-                        snapshot,
-                        rows.start + DisplayRow(row_offset as u32),
-                    )
-                },
-                bg_segments_per_row,
-                window,
-                cx,
-            )
+            if defer_expensive_text_styling {
+                LineWithInvisibles::from_chunks(
+                    snapshot
+                        .chunks(rows.clone(), false, HighlightStyles::default())
+                        .map(|chunk| HighlightedChunk {
+                            text: chunk.text,
+                            style: None,
+                            is_tab: false,
+                            is_inlay: false,
+                            replacement: None,
+                            newlines: chunk.newlines,
+                        }),
+                    style,
+                    max_line_len,
+                    rows.len(),
+                    &snapshot.mode,
+                    false,
+                    editor_width,
+                    is_row_soft_wrapped,
+                    |row_offset| {
+                        line_ending_for_display_row(
+                            snapshot,
+                            rows.start + DisplayRow(row_offset as u32),
+                        )
+                    },
+                    bg_segments_per_row,
+                    window,
+                    cx,
+                )
+            } else {
+                let use_tree_sitter = !snapshot.semantic_tokens_enabled
+                    || snapshot.use_tree_sitter_for_syntax(rows.start, cx);
+                LineWithInvisibles::from_chunks(
+                    snapshot.highlighted_chunks(rows.clone(), use_tree_sitter, style),
+                    style,
+                    max_line_len,
+                    rows.len(),
+                    &snapshot.mode,
+                    true,
+                    editor_width,
+                    is_row_soft_wrapped,
+                    |row_offset| {
+                        line_ending_for_display_row(
+                            snapshot,
+                            rows.start + DisplayRow(row_offset as u32),
+                        )
+                    },
+                    bg_segments_per_row,
+                    window,
+                    cx,
+                )
+            }
         }
     }
 
@@ -8775,6 +8806,7 @@ impl LineWithInvisibles {
         max_line_len: usize,
         max_line_count: usize,
         editor_mode: &EditorMode,
+        render_invisibles: bool,
         text_width: Pixels,
         is_row_soft_wrapped: impl Copy + Fn(usize) -> bool,
         line_ending_for_row: impl Copy + Fn(usize) -> Option<LineEnding>,
@@ -8888,6 +8920,7 @@ impl LineWithInvisibles {
                         highlighted_chunk.style,
                         highlighted_chunk.is_tab,
                         highlighted_chunk.is_inlay,
+                        render_invisibles,
                         &mut line,
                         &mut styles,
                         &mut invisibles,
@@ -8914,6 +8947,7 @@ impl LineWithInvisibles {
                         line_ending.is_some(),
                         editor_mode,
                         line_ending,
+                        render_invisibles,
                         bg_segments_per_row,
                         min_contrast,
                         window,
@@ -8934,6 +8968,7 @@ impl LineWithInvisibles {
                     highlighted_chunk.style,
                     highlighted_chunk.is_tab,
                     highlighted_chunk.is_inlay,
+                    render_invisibles,
                     &mut line,
                     &mut styles,
                     &mut invisibles,
@@ -8961,6 +8996,7 @@ impl LineWithInvisibles {
             false,
             editor_mode,
             None,
+            render_invisibles,
             bg_segments_per_row,
             min_contrast,
             window,
@@ -9011,11 +9047,12 @@ impl LineWithInvisibles {
         show_line_ending: bool,
         editor_mode: &EditorMode,
         line_ending: Option<LineEnding>,
+        render_invisibles: bool,
         bg_segments_per_row: &[Vec<(Range<DisplayPoint>, Hsla)>],
         min_contrast: f32,
         window: &mut Window,
     ) {
-        if show_line_ending && editor_mode.is_full() {
+        if render_invisibles && show_line_ending && editor_mode.is_full() {
             let line_offset = line.len();
             if line_ending == Some(LineEnding::Windows) {
                 invisibles.push(Invisible::CarriageReturn { line_offset });
@@ -9050,6 +9087,7 @@ impl LineWithInvisibles {
         style: Option<HighlightStyle>,
         is_tab: bool,
         is_inlay: bool,
+        render_invisibles: bool,
         line: &mut String,
         styles: &mut Vec<TextRun>,
         invisibles: &mut Vec<Invisible>,
@@ -9073,7 +9111,7 @@ impl LineWithInvisibles {
             Cow::Borrowed(text_style)
         };
 
-        let should_limit_line_len = max_line_len != usize::MAX && is_row_soft_wrapped(row);
+        let should_limit_line_len = max_line_len != usize::MAX;
         if should_limit_line_len && line.len() > max_line_len.saturating_sub(line_chunk.len()) {
             let mut chunk_len = max_line_len.saturating_sub(line.len());
             if chunk_len == 0 {
@@ -9096,7 +9134,7 @@ impl LineWithInvisibles {
             strikethrough: text_style.strikethrough,
         });
 
-        if editor_mode.is_full() && !is_inlay {
+        if render_invisibles && editor_mode.is_full() && !is_inlay {
             let is_soft_wrapped = is_row_soft_wrapped(row);
             if is_tab {
                 if *non_whitespace_added || !is_soft_wrapped {
@@ -9293,8 +9331,8 @@ impl LineWithInvisibles {
     ) {
         let line_height = layout.position_map.line_height;
         let render_scroll_x = layout.position_map.scroll_pixel_position.x.round();
-        let mut fragment_origin = content_origin
-            + gpui::point(Pixels::from(-render_scroll_x), line_y);
+        let mut fragment_origin =
+            content_origin + gpui::point(Pixels::from(-render_scroll_x), line_y);
 
         for fragment in &self.fragments {
             match fragment {
@@ -9341,8 +9379,8 @@ impl LineWithInvisibles {
         let line_y = line_height * (row.as_f64() - layout.position_map.scroll_position.y) as f32;
         let render_scroll_x = layout.position_map.scroll_pixel_position.x.round();
 
-        let mut fragment_origin = content_origin
-            + gpui::point(Pixels::from(-render_scroll_x), line_y);
+        let mut fragment_origin =
+            content_origin + gpui::point(Pixels::from(-render_scroll_x), line_y);
 
         for fragment in &self.fragments {
             match fragment {
@@ -10059,50 +10097,65 @@ impl Element for EditorElement {
                         )
                     };
 
-                    let mut highlighted_rows = self
-                        .editor
-                        .update(cx, |editor, cx| editor.highlighted_display_rows(window, cx));
+                    let scroll_manager = &self.editor.read(cx).scroll_manager;
+                    let defer_expensive_text_styling =
+                        scroll_manager.defer_expensive_text_styling();
+                    let defer_non_essential_overlays = if is_minimap {
+                        false
+                    } else {
+                        scroll_manager.defer_non_essential_overlays()
+                    };
+
+                    let mut highlighted_rows = if defer_non_essential_overlays {
+                        BTreeMap::default()
+                    } else {
+                        self.editor
+                            .update(cx, |editor, cx| editor.highlighted_display_rows(window, cx))
+                    };
 
                     let is_light = cx.theme().appearance().is_light();
 
-                    let mut highlighted_ranges = self
-                        .editor_with_selections(cx)
-                        .map(|editor| {
-                            if editor == self.editor {
-                                editor.read(cx).background_highlights_in_range(
-                                    start_anchor..end_anchor,
-                                    &snapshot.display_snapshot,
-                                    cx.theme(),
-                                )
-                            } else {
-                                editor.update(cx, |editor, cx| {
-                                    let snapshot = editor.snapshot(window, cx);
-                                    let start_anchor = if start_row == Default::default() {
-                                        Anchor::min()
-                                    } else {
-                                        snapshot.buffer_snapshot().anchor_before(
-                                            DisplayPoint::new(start_row, 0)
-                                                .to_offset(&snapshot, Bias::Left),
-                                        )
-                                    };
-                                    let end_anchor = if end_row > max_row {
-                                        Anchor::max()
-                                    } else {
-                                        snapshot.buffer_snapshot().anchor_before(
-                                            DisplayPoint::new(end_row, 0)
-                                                .to_offset(&snapshot, Bias::Right),
-                                        )
-                                    };
-
-                                    editor.background_highlights_in_range(
+                    let mut highlighted_ranges = if defer_non_essential_overlays {
+                        Vec::new()
+                    } else {
+                        self.editor_with_selections(cx)
+                            .map(|editor| {
+                                if editor == self.editor {
+                                    editor.read(cx).background_highlights_in_range(
                                         start_anchor..end_anchor,
                                         &snapshot.display_snapshot,
                                         cx.theme(),
                                     )
-                                })
-                            }
-                        })
-                        .unwrap_or_default();
+                                } else {
+                                    editor.update(cx, |editor, cx| {
+                                        let snapshot = editor.snapshot(window, cx);
+                                        let start_anchor = if start_row == Default::default() {
+                                            Anchor::min()
+                                        } else {
+                                            snapshot.buffer_snapshot().anchor_before(
+                                                DisplayPoint::new(start_row, 0)
+                                                    .to_offset(&snapshot, Bias::Left),
+                                            )
+                                        };
+                                        let end_anchor = if end_row > max_row {
+                                            Anchor::max()
+                                        } else {
+                                            snapshot.buffer_snapshot().anchor_before(
+                                                DisplayPoint::new(end_row, 0)
+                                                    .to_offset(&snapshot, Bias::Right),
+                                            )
+                                        };
+
+                                        editor.background_highlights_in_range(
+                                            start_anchor..end_anchor,
+                                            &snapshot.display_snapshot,
+                                            cx.theme(),
+                                        )
+                                    })
+                                }
+                            })
+                            .unwrap_or_default()
+                    };
 
                     for (ix, row_info) in row_infos.iter().enumerate() {
                         let Some(diff_status) = row_info.diff_status else {
@@ -10179,19 +10232,25 @@ impl Element for EditorElement {
                         }
                     }
 
-                    let highlighted_gutter_ranges =
+                    let highlighted_gutter_ranges = if defer_non_essential_overlays {
+                        Vec::new()
+                    } else {
                         self.editor.read(cx).gutter_highlights_in_range(
                             start_anchor..end_anchor,
                             &snapshot.display_snapshot,
                             cx,
-                        );
+                        )
+                    };
 
-                    let document_colors = self
-                        .editor
-                        .read(cx)
-                        .colors
-                        .as_ref()
-                        .map(|colors| colors.editor_display_highlights(&snapshot));
+                    let document_colors = if defer_non_essential_overlays {
+                        None
+                    } else {
+                        self.editor
+                            .read(cx)
+                            .colors
+                            .as_ref()
+                            .map(|colors| colors.editor_display_highlights(&snapshot))
+                    };
                     let redacted_ranges = self.editor.read(cx).redacted_ranges(
                         start_anchor..end_anchor,
                         &snapshot.display_snapshot,
@@ -10346,7 +10405,9 @@ impl Element for EditorElement {
                         }
                     });
 
-                    let mut expand_toggles =
+                    let mut expand_toggles = if defer_non_essential_overlays {
+                        Vec::new()
+                    } else {
                         window.with_element_namespace("expand_toggles", |window| {
                             self.layout_expand_toggles(
                                 &gutter_hitbox,
@@ -10358,9 +10419,12 @@ impl Element for EditorElement {
                                 window,
                                 cx,
                             )
-                        });
+                        })
+                    };
 
-                    let mut crease_toggles =
+                    let mut crease_toggles = if defer_non_essential_overlays {
+                        Vec::new()
+                    } else {
                         window.with_element_namespace("crease_toggles", |window| {
                             self.layout_crease_toggles(
                                 start_row..end_row,
@@ -10370,7 +10434,8 @@ impl Element for EditorElement {
                                 window,
                                 cx,
                             )
-                        });
+                        })
+                    };
                     let crease_trailers =
                         window.with_element_namespace("crease_trailers", |window| {
                             self.layout_crease_trailers(
@@ -10390,14 +10455,16 @@ impl Element for EditorElement {
                         cx,
                     );
 
-                    Self::layout_word_diff_highlights(
-                        &display_hunks,
-                        &row_infos,
-                        start_row,
-                        &snapshot,
-                        &mut highlighted_ranges,
-                        cx,
-                    );
+                    if !defer_non_essential_overlays {
+                        Self::layout_word_diff_highlights(
+                            &display_hunks,
+                            &row_infos,
+                            start_row,
+                            &snapshot,
+                            &mut highlighted_ranges,
+                            cx,
+                        );
+                    }
 
                     let merged_highlighted_ranges =
                         if let Some((_, colors)) = document_colors.as_ref() {
@@ -10415,7 +10482,13 @@ impl Element for EditorElement {
                         &merged_highlighted_ranges,
                         self.style.background,
                     );
-                    let max_line_len = max_render_line_len(self.editor.read(cx).soft_wrap_mode(cx));
+                    let max_line_len = max_render_line_len(
+                        self.editor.read(cx).soft_wrap_mode(cx),
+                        scroll_position.x,
+                        editor_width,
+                        em_advance,
+                        defer_expensive_text_styling,
+                    );
 
                     let mut line_layouts = Self::layout_lines(
                         start_row..end_row,
@@ -10423,6 +10496,7 @@ impl Element for EditorElement {
                         &self.style,
                         max_line_len,
                         editor_width,
+                        defer_expensive_text_styling,
                         is_row_soft_wrapped,
                         &bg_segments_per_row,
                         window,
@@ -10484,25 +10558,23 @@ impl Element for EditorElement {
                         })
                         .unwrap_or(Pixels::ZERO);
 
+                    let widest_visible_line = line_layouts
+                        .iter()
+                        .fold(Pixels::ZERO, |width, line| width.max(line.width));
                     let longest_row = snapshot.longest_row();
-                    let longest_row_is_soft_wrapped =
-                        snapshot.soft_wrap_indent(longest_row).is_some();
-                    let longest_line_width = layout_line(
-                        longest_row,
-                        &snapshot,
-                        style,
-                        max_line_len,
-                        editor_width,
-                        move |_| longest_row_is_soft_wrapped,
-                        window,
-                        cx,
-                    )
-                    .width
-                    .max(
-                        line_layouts
-                            .iter()
-                            .fold(Pixels::ZERO, |width, line| width.max(line.width)),
-                    );
+                    let longest_row_layout = longest_row
+                        .0
+                        .checked_sub(start_row.0)
+                        .and_then(|row_offset| line_layouts.get(row_offset as usize));
+                    let longest_line_width = if let Some(longest_row_layout) = longest_row_layout {
+                        longest_row_layout.width.max(widest_visible_line)
+                    } else {
+                        // Avoid shaping the full longest row every frame.
+                        let estimated_longest_width =
+                            (em_advance * snapshot.line_len(longest_row) as f32).ceil()
+                                + em_advance;
+                        estimated_longest_width.max(widest_visible_line)
+                    };
 
                     let scrollbar_layout_information = ScrollbarLayoutInformation::new(
                         text_hitbox.bounds,
@@ -10741,26 +10813,32 @@ impl Element for EditorElement {
                         })
                         .unzip();
 
-                    let mut inline_diagnostics = self.layout_inline_diagnostics(
-                        &line_layouts,
-                        &crease_trailers,
-                        &row_block_types,
-                        content_origin,
-                        scroll_position,
-                        scroll_pixel_position,
-                        edit_prediction_popover_origin,
-                        start_row,
-                        end_row,
-                        line_height,
-                        em_width,
-                        style,
-                        window,
-                        cx,
-                    );
+                    let mut inline_diagnostics = if defer_non_essential_overlays {
+                        HashMap::default()
+                    } else {
+                        self.layout_inline_diagnostics(
+                            &line_layouts,
+                            &crease_trailers,
+                            &row_block_types,
+                            content_origin,
+                            scroll_position,
+                            scroll_pixel_position,
+                            edit_prediction_popover_origin,
+                            start_row,
+                            end_row,
+                            line_height,
+                            em_width,
+                            style,
+                            window,
+                            cx,
+                        )
+                    };
 
                     let mut inline_blame_layout = None;
                     let mut inline_code_actions = None;
-                    if let Some(newest_selection_head) = newest_selection_head {
+                    if !defer_non_essential_overlays
+                        && let Some(newest_selection_head) = newest_selection_head
+                    {
                         let display_row = newest_selection_head.row();
                         if (start_row..end_row).contains(&display_row)
                             && !row_block_types.contains_key(&display_row)
@@ -10814,16 +10892,20 @@ impl Element for EditorElement {
                         }
                     }
 
-                    let blamed_display_rows = self.layout_blame_entries(
-                        &row_infos,
-                        em_width,
-                        scroll_position,
-                        line_height,
-                        &gutter_hitbox,
-                        gutter_dimensions.git_blame_entries_width,
-                        window,
-                        cx,
-                    );
+                    let blamed_display_rows = if defer_non_essential_overlays {
+                        None
+                    } else {
+                        self.layout_blame_entries(
+                            &row_infos,
+                            em_width,
+                            scroll_position,
+                            line_height,
+                            &gutter_hitbox,
+                            gutter_dimensions.git_blame_entries_width,
+                            window,
+                            cx,
+                        )
+                    };
 
                     let line_elements = self.prepaint_lines(
                         start_row,
@@ -11029,21 +11111,23 @@ impl Element for EditorElement {
                             )
                         });
 
-                    self.layout_signature_help(
-                        &hitbox,
-                        content_origin,
-                        scroll_pixel_position,
-                        newest_selection_head,
-                        start_row,
-                        &line_layouts,
-                        line_height,
-                        em_width,
-                        context_menu_layout,
-                        window,
-                        cx,
-                    );
+                    if !defer_non_essential_overlays {
+                        self.layout_signature_help(
+                            &hitbox,
+                            content_origin,
+                            scroll_pixel_position,
+                            newest_selection_head,
+                            start_row,
+                            &line_layouts,
+                            line_height,
+                            em_width,
+                            context_menu_layout,
+                            window,
+                            cx,
+                        );
+                    }
 
-                    if !cx.has_active_drag() {
+                    if !defer_non_essential_overlays && !cx.has_active_drag() {
                         self.layout_hover_popovers(
                             &snapshot,
                             &hitbox,
@@ -11061,30 +11145,36 @@ impl Element for EditorElement {
                         self.layout_blame_popover(&snapshot, &hitbox, line_height, window, cx);
                     }
 
-                    let mouse_context_menu = self.layout_mouse_context_menu(
-                        &snapshot,
-                        start_row..end_row,
-                        content_origin,
-                        window,
-                        cx,
-                    );
-
-                    window.with_element_namespace("crease_toggles", |window| {
-                        self.prepaint_crease_toggles(
-                            &mut crease_toggles,
-                            line_height,
-                            &gutter_dimensions,
-                            gutter_settings,
-                            scroll_pixel_position,
-                            &gutter_hitbox,
+                    let mouse_context_menu = if defer_non_essential_overlays {
+                        None
+                    } else {
+                        self.layout_mouse_context_menu(
+                            &snapshot,
+                            start_row..end_row,
+                            content_origin,
                             window,
                             cx,
                         )
-                    });
+                    };
 
-                    window.with_element_namespace("expand_toggles", |window| {
-                        self.prepaint_expand_toggles(&mut expand_toggles, window, cx)
-                    });
+                    if !defer_non_essential_overlays {
+                        window.with_element_namespace("crease_toggles", |window| {
+                            self.prepaint_crease_toggles(
+                                &mut crease_toggles,
+                                line_height,
+                                &gutter_dimensions,
+                                gutter_settings,
+                                scroll_pixel_position,
+                                &gutter_hitbox,
+                                window,
+                                cx,
+                            )
+                        });
+
+                        window.with_element_namespace("expand_toggles", |window| {
+                            self.prepaint_expand_toggles(&mut expand_toggles, window, cx)
+                        });
+                    }
 
                     let wrap_guides = self.layout_wrap_guides(
                         em_advance,
@@ -11176,7 +11266,9 @@ impl Element for EditorElement {
                     };
 
                     let (diff_hunk_controls, diff_hunk_control_bounds) =
-                        if is_read_only && !self.editor.read(cx).delegate_stage_and_restore {
+                        if defer_non_essential_overlays
+                            || (is_read_only && !self.editor.read(cx).delegate_stage_and_restore)
+                        {
                             (vec![], vec![])
                         } else {
                             self.layout_diff_hunk_controls(
@@ -12258,6 +12350,7 @@ pub fn layout_line(
         max_line_len,
         1,
         &snapshot.mode,
+        true,
         text_width,
         is_row_soft_wrapped,
         |row_offset| line_ending_for_display_row(snapshot, row + DisplayRow(row_offset as u32)),
@@ -12617,9 +12710,35 @@ fn calculate_wrap_width(
     }
 }
 
-fn max_render_line_len(soft_wrap: SoftWrap) -> usize {
-    let _ = soft_wrap;
-    usize::MAX
+fn max_render_line_len(
+    soft_wrap: SoftWrap,
+    horizontal_scroll_offset: ScrollOffset,
+    editor_width: Pixels,
+    em_advance: Pixels,
+    defer_expensive_text_styling: bool,
+) -> usize {
+    match soft_wrap {
+        SoftWrap::None | SoftWrap::GitDiff => {
+            let visible_columns = f64::from((editor_width / em_advance).max(0.0).ceil());
+            let overscan_columns = if defer_expensive_text_styling {
+                visible_columns.max(128.0)
+            } else {
+                visible_columns.max(MAX_LINE_LEN as f64)
+            };
+            let minimum_columns = if defer_expensive_text_styling {
+                (visible_columns + 64.0).max(1.0)
+            } else {
+                (MAX_LINE_LEN + 1) as f64
+            };
+            (horizontal_scroll_offset + visible_columns + overscan_columns)
+                .ceil()
+                .max(minimum_columns) as usize
+        }
+        SoftWrap::PreferLine
+        | SoftWrap::EditorWidth
+        | SoftWrap::Column(_)
+        | SoftWrap::Bounded(_) => MAX_LINE_LEN,
+    }
 }
 
 fn compute_auto_height_layout(
