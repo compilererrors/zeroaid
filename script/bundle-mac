@@ -14,6 +14,26 @@ zed_feature_flags=(--no-default-features)
 IDENTITY="Zed Industries, Inc."
 APPLE_NOTARIZATION_TEAM="MQ55VZLNZQ"
 
+reject_stripped_features() {
+  local raw_features="$1"
+  local previous_ifs="$IFS"
+  IFS=','
+  read -r -a feature_list <<< "$raw_features"
+  IFS="$previous_ifs"
+
+  for raw_feature in "${feature_list[@]}"; do
+    local feature="${raw_feature//[[:space:]]/}"
+    case "$feature" in
+      "" )
+        ;;
+      ai|collab|audio|audio/*)
+        echo "Feature '$feature' is stripped in this fork (ai/collab/audio/webrtc)." >&2
+        exit 1
+        ;;
+    esac
+  done
+}
+
 # Function for displaying help info
 help_info() {
   echo "
@@ -31,6 +51,7 @@ Options:
 }
 
 if [[ -n "${ZED_BUILD_FEATURES:-}" ]]; then
+    reject_stripped_features "${ZED_BUILD_FEATURES}"
     zed_feature_flags+=(--features "${ZED_BUILD_FEATURES}")
 fi
 
@@ -46,6 +67,7 @@ do
             ;;
         n) ;;
         f)
+            reject_stripped_features "${OPTARG}"
             zed_feature_flags+=(--features "${OPTARG}")
             ;;
         i) local_install=true;;

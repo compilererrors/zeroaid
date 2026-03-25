@@ -29,7 +29,30 @@ $Architecture = if ($Architecture) {
 $CargoOutDir = "./target/$Architecture-pc-windows-msvc/release"
 $ZedFeatureFlags = @("--no-default-features")
 
+function Assert-AllowedZedFeatures {
+    param(
+        [string]$Features
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Features)) {
+        return
+    }
+
+    $forbiddenFeatures = @("ai", "collab", "audio")
+    foreach ($rawFeature in $Features.Split(",")) {
+        $feature = $rawFeature.Trim()
+        if ([string]::IsNullOrWhiteSpace($feature)) {
+            continue
+        }
+
+        if ($forbiddenFeatures -contains $feature -or $feature.StartsWith("audio/")) {
+            throw "Feature '$feature' is stripped in this fork (ai/collab/audio/webrtc)."
+        }
+    }
+}
+
 if ($env:ZED_BUILD_FEATURES) {
+    Assert-AllowedZedFeatures -Features $env:ZED_BUILD_FEATURES
     $ZedFeatureFlags += @("--features", $env:ZED_BUILD_FEATURES)
 }
 
