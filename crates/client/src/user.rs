@@ -695,6 +695,30 @@ impl UserStore {
         self.current_organization.clone()
     }
 
+    pub fn organizations(&self) -> &[Arc<Organization>] {
+        &self.organizations
+    }
+
+    pub fn plan_for_organization(&self, organization_id: &OrganizationId) -> Option<Plan> {
+        self.plans_by_organization.get(organization_id).copied()
+    }
+
+    pub fn set_current_organization(
+        &mut self,
+        organization: Arc<Organization>,
+        cx: &mut Context<Self>,
+    ) {
+        let current_organization_id = self.current_organization.as_ref().map(|org| &org.id);
+        if current_organization_id == Some(&organization.id) {
+            return;
+        }
+
+        self.current_organization = Some(organization);
+        cx.emit(Event::OrganizationChanged);
+        cx.emit(Event::PlanUpdated);
+        cx.notify();
+    }
+
     pub fn plan(&self) -> Option<Plan> {
         #[cfg(debug_assertions)]
         if let Ok(plan) = std::env::var("ZED_SIMULATE_PLAN").as_ref() {

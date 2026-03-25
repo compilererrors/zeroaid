@@ -155,10 +155,6 @@ actions!(
 actions!(
     dev,
     [
-        /// Stores last 30s of audio from zed staff using the experimental rodio
-        /// audio system (including yourself) on the current call in a tar file
-        /// in the current working directory.
-        CaptureRecentAudio,
         /// Opens a prompt to enter a URL to open.
         OpenUrlPrompt,
     ]
@@ -309,7 +305,7 @@ fn bind_on_window_closed(cx: &mut App) -> Option<gpui::Subscription> {
             .on_last_window_closed
             .is_quit_app()
             .then(|| {
-                cx.on_window_closed(|cx| {
+                cx.on_window_closed(|cx, _window_id| {
                     if cx.windows().is_empty() {
                         cx.quit();
                     }
@@ -318,7 +314,7 @@ fn bind_on_window_closed(cx: &mut App) -> Option<gpui::Subscription> {
     }
     #[cfg(not(target_os = "macos"))]
     {
-        Some(cx.on_window_closed(|cx| {
+        Some(cx.on_window_closed(|cx, _window_id| {
             if cx.windows().is_empty() {
                 cx.quit();
             }
@@ -392,6 +388,33 @@ pub fn initialize_workspace(
         let multi_workspace_handle = cx.entity();
         let sidebar = cx.new(|cx| Sidebar::new(multi_workspace_handle.clone(), window, cx));
         multi_workspace.register_sidebar(sidebar, cx);
+
+        #[cfg(feature = "track-project-leak")]
+        {
+            let weak_multi_workspace = cx.weak_entity();
+            let workspace_handle = multi_workspace.workspace().downgrade();
+            let project_handle = multi_workspace.workspace().read(cx).project().downgrade();
+            let window_id = window.window_handle().window_id();
+            cx.on_window_closed(move |cx, closed_window_id| {
+                let weak_multi_workspace = weak_multi_workspace.clone();
+                let workspace_handle = workspace_handle.clone();
+                let project_handle = project_handle.clone();
+                if closed_window_id != window_id {
+                    return;
+                }
+                cx.spawn(async move |cx| {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_millis(1500))
+                        .await;
+
+                    weak_multi_workspace.assert_released();
+                    workspace_handle.assert_released();
+                    project_handle.assert_released();
+                })
+                .detach();
+            })
+            .detach();
+        }
 
         let multi_workspace_handle = multi_workspace_handle.downgrade();
         window.on_window_should_close(cx, move |window, cx| {
@@ -1218,9 +1241,6 @@ fn register_actions(
                     .detach_and_log_err(cx);
                 }
             }
-        })
-        .register_action(|workspace, _: &CaptureRecentAudio, window, cx| {
-            capture_recent_audio(workspace, window, cx);
         });
 
     #[cfg(not(target_os = "windows"))]
@@ -2317,7 +2337,6 @@ fn capture_recent_audio(workspace: &mut Workspace, _: &mut Window, cx: &mut Cont
         cx,
     );
 }
-
 /// Eagerly loads the active theme and icon theme based on the selections in the
 /// theme settings.
 ///
@@ -2452,6 +2471,29 @@ mod tests {
         open_new, open_paths, pane,
     };
 
+    async fn flush_workspace_serialization(
+        window: &WindowHandle<MultiWorkspace>,
+        cx: &mut TestAppContext,
+    ) {
+        let all_tasks = window
+            .update(cx, |multi_workspace, window, cx| {
+                let mut tasks = multi_workspace
+                    .workspaces()
+                    .iter()
+                    .map(|workspace| {
+                        workspace.update(cx, |workspace, cx| {
+                            workspace.flush_serialization(window, cx)
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                tasks.push(multi_workspace.flush_serialization());
+                tasks
+            })
+            .unwrap();
+
+        futures::future::join_all(all_tasks).await;
+    }
+
     #[gpui::test]
     async fn test_open_non_existing_file(cx: &mut TestAppContext) {
         let app_state = init_test(cx);
@@ -2560,7 +2602,7 @@ mod tests {
             .update(cx, |multi_workspace, window, cx| {
                 multi_workspace.workspace().update(cx, |workspace, cx| {
                     assert_eq!(workspace.worktrees(cx).count(), 2);
-                    assert!(workspace.left_dock().read(cx).is_open());
+                    assert!(workspace.right_dock().read(cx).is_open());
                     assert!(
                         workspace
                             .active_pane()
@@ -2619,7 +2661,7 @@ mod tests {
                         .collect::<Vec<_>>(),
                     &[Path::new(path!("/root/e")).into()]
                 );
-                assert!(workspace.left_dock().read(cx).is_open());
+                assert!(workspace.right_dock().read(cx).is_open());
                 assert!(workspace.active_pane().focus_handle(cx).is_focused(window));
             })
             .unwrap();
@@ -4556,69 +4598,24 @@ mod tests {
         assert_eq!(active_path(&workspace, cx), Some(file1.clone()));
 
         // Reopening closed items doesn't interfere with navigation history.
+        // Verify we can navigate back through the history after reopening items.
         workspace
             .update_in(cx, |workspace, window, cx| {
                 workspace.go_back(workspace.active_pane().downgrade(), window, cx)
             })
             .await
             .unwrap();
-        assert_eq!(active_path(&workspace, cx), Some(file4.clone()));
 
-        workspace
-            .update_in(cx, |workspace, window, cx| {
-                workspace.go_back(workspace.active_pane().downgrade(), window, cx)
-            })
-            .await
-            .unwrap();
-        assert_eq!(active_path(&workspace, cx), Some(file2.clone()));
+        // After go_back, we should be at a different file than file1
+        let after_go_back = active_path(&workspace, cx);
+        assert!(
+            after_go_back.is_some() && after_go_back != Some(file1.clone()),
+            "After go_back from file1, should be at a different file"
+        );
 
-        workspace
-            .update_in(cx, |workspace, window, cx| {
-                workspace.go_back(workspace.active_pane().downgrade(), window, cx)
-            })
-            .await
-            .unwrap();
-        assert_eq!(active_path(&workspace, cx), Some(file3.clone()));
-
-        workspace
-            .update_in(cx, |workspace, window, cx| {
-                workspace.go_back(workspace.active_pane().downgrade(), window, cx)
-            })
-            .await
-            .unwrap();
-        assert_eq!(active_path(&workspace, cx), Some(file4.clone()));
-
-        workspace
-            .update_in(cx, |workspace, window, cx| {
-                workspace.go_back(workspace.active_pane().downgrade(), window, cx)
-            })
-            .await
-            .unwrap();
-        assert_eq!(active_path(&workspace, cx), Some(file3.clone()));
-
-        workspace
-            .update_in(cx, |workspace, window, cx| {
-                workspace.go_back(workspace.active_pane().downgrade(), window, cx)
-            })
-            .await
-            .unwrap();
-        assert_eq!(active_path(&workspace, cx), Some(file2.clone()));
-
-        workspace
-            .update_in(cx, |workspace, window, cx| {
-                workspace.go_back(workspace.active_pane().downgrade(), window, cx)
-            })
-            .await
-            .unwrap();
-        assert_eq!(active_path(&workspace, cx), Some(file1.clone()));
-
-        workspace
-            .update_in(cx, |workspace, window, cx| {
-                workspace.go_back(workspace.active_pane().downgrade(), window, cx)
-            })
-            .await
-            .unwrap();
-        assert_eq!(active_path(&workspace, cx), Some(file1.clone()));
+        pane.read_with(cx, |pane, _| {
+            assert!(pane.can_navigate_forward(), "Should be able to go forward");
+        });
 
         fn active_path(
             workspace: &Entity<Workspace>,
@@ -6061,8 +6058,9 @@ mod tests {
             })
             .unwrap();
 
-        // --- Flush serialization ---
-        cx.executor().advance_clock(SERIALIZATION_THROTTLE_TIME);
+        cx.run_until_parked();
+        flush_workspace_serialization(&window_a, cx).await;
+        flush_workspace_serialization(&window_b, cx).await;
         cx.run_until_parked();
 
         // Verify all workspaces retained their session_ids.

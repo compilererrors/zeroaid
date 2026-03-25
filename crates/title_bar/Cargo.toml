@@ -15,7 +15,7 @@ doctest = false
 [features]
 ai = []
 default = []
-collab = ["dep:call", "dep:channel"]
+collab = ["dep:call", "dep:channel", "dep:livekit_client"]
 stories = ["dep:story"]
 test-support = [
     "ai",
@@ -45,7 +45,7 @@ db.workspace = true
 git_ui.workspace = true
 gpui = { workspace = true, features = ["screen-capture"] }
 icons.workspace = true
-livekit_client.workspace = true
+livekit_client = { workspace = true, optional = true }
 notifications.workspace = true
 project.workspace = true
 recent_projects.workspace = true
