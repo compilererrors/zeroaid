@@ -7,7 +7,7 @@ pub use sidebar_ai::Sidebar;
 #[cfg(not(feature = "ai"))]
 mod lean_sidebar {
     use gpui::{App, Context, Entity, FocusHandle, Focusable, Pixels, Render, Window, px};
-    use workspace::{MultiWorkspace, Sidebar as WorkspaceSidebar};
+    use workspace::{MultiWorkspace, Sidebar as WorkspaceSidebar, SidebarSide};
 
     const DEFAULT_WIDTH: Pixels = px(320.0);
     const MIN_WIDTH: Pixels = px(200.0);
@@ -52,6 +52,10 @@ mod lean_sidebar {
 
         fn has_notifications(&self, _cx: &App) -> bool {
             false
+        }
+
+        fn side(&self, _cx: &App) -> SidebarSide {
+            SidebarSide::Left
         }
     }
 

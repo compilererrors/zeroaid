@@ -1250,7 +1250,7 @@ impl GitStore {
             if buffer
                 .read(cx)
                 .language()
-                .is_none_or(|lang| lang.name() != "Rust".into())
+                .is_none_or(|lang| lang.name() != "Rust")
             {
                 return Task::ready(Err(anyhow!("no permalink available")));
             }
@@ -3705,6 +3705,23 @@ impl RepositorySnapshot {
                 .map(worktree_to_proto)
                 .collect(),
         }
+    }
+
+    /// The main worktree is the original checkout that other worktrees were
+    /// created from.
+    ///
+    /// For example, if you had both `~/code/zed` and `~/code/worktrees/zed-2`,
+    /// then `~/code/zed` is the main worktree and `~/code/worktrees/zed-2` is a linked worktree.
+    pub fn is_main_worktree(&self) -> bool {
+        self.work_directory_abs_path == self.original_repo_abs_path
+    }
+
+    /// Returns true if this repository is a linked worktree, that is, one that
+    /// was created from another worktree.
+    ///
+    /// This is by definition the opposite of [`Self::is_main_worktree`].
+    pub fn is_linked_worktree(&self) -> bool {
+        !self.is_main_worktree()
     }
 
     pub fn linked_worktrees(&self) -> &[GitWorktree] {

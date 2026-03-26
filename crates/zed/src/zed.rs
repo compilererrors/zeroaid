@@ -498,6 +498,7 @@ pub fn initialize_workspace(
         let search_button = cx.new(|_| search::search_status_button::SearchButton::new());
         let diagnostic_summary =
             cx.new(|cx| diagnostics::items::DiagnosticIndicator::new(workspace, cx));
+        let active_file_name = cx.new(|_| workspace::active_file_name::ActiveFileName::new());
         let activity_indicator = activity_indicator::ActivityIndicator::new(
             workspace,
             workspace.project().read(cx).languages().clone(),
@@ -530,6 +531,7 @@ pub fn initialize_workspace(
             status_bar.add_left_item(search_button, window, cx);
             status_bar.add_left_item(lsp_button, window, cx);
             status_bar.add_left_item(diagnostic_summary, window, cx);
+            status_bar.add_left_item(active_file_name, window, cx);
             status_bar.add_left_item(activity_indicator, window, cx);
             #[cfg(feature = "ai")]
             status_bar.add_right_item(edit_prediction_ui, window, cx);
