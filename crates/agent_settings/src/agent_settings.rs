@@ -415,15 +415,15 @@ pub fn normalize_path(raw: &str) -> String {
 
 impl Settings for AgentSettings {
     fn from_settings(content: &settings::SettingsContent) -> Self {
-        let agent = content.agent.clone().unwrap();
+        let agent = content.agent.clone().unwrap_or_default();
         Self {
-            enabled: agent.enabled.unwrap(),
-            button: agent.button.unwrap(),
-            dock: agent.dock.unwrap(),
-            sidebar_side: agent.sidebar_side.unwrap(),
-            default_width: px(agent.default_width.unwrap()),
-            default_height: px(agent.default_height.unwrap()),
-            default_model: Some(agent.default_model.unwrap()),
+            enabled: agent.enabled.unwrap_or(true),
+            button: agent.button.unwrap_or(true),
+            dock: agent.dock.unwrap_or(DockPosition::Right),
+            sidebar_side: agent.sidebar_side.unwrap_or_default(),
+            default_width: px(agent.default_width.unwrap_or(640.0)),
+            default_height: px(agent.default_height.unwrap_or(320.0)),
+            default_model: agent.default_model,
             inline_assistant_model: agent.inline_assistant_model,
             inline_assistant_use_streaming_tools: agent
                 .inline_assistant_use_streaming_tools
@@ -432,26 +432,26 @@ impl Settings for AgentSettings {
             thread_summary_model: agent.thread_summary_model,
             inline_alternatives: agent.inline_alternatives.unwrap_or_default(),
             favorite_models: agent.favorite_models,
-            default_profile: AgentProfileId(agent.default_profile.unwrap()),
-            default_view: agent.default_view.unwrap(),
+            default_profile: AgentProfileId(agent.default_profile.unwrap_or_else(|| "write".into())),
+            default_view: agent.default_view.unwrap_or_default(),
             profiles: agent
                 .profiles
-                .unwrap()
+                .unwrap_or_default()
                 .into_iter()
                 .map(|(key, val)| (AgentProfileId(key), val.into()))
                 .collect(),
 
-            notify_when_agent_waiting: agent.notify_when_agent_waiting.unwrap(),
-            play_sound_when_agent_done: agent.play_sound_when_agent_done.unwrap(),
-            single_file_review: agent.single_file_review.unwrap(),
+            notify_when_agent_waiting: agent.notify_when_agent_waiting.unwrap_or_default(),
+            play_sound_when_agent_done: agent.play_sound_when_agent_done.unwrap_or(false),
+            single_file_review: agent.single_file_review.unwrap_or(false),
             model_parameters: agent.model_parameters,
-            enable_feedback: agent.enable_feedback.unwrap(),
-            expand_edit_card: agent.expand_edit_card.unwrap(),
-            expand_terminal_card: agent.expand_terminal_card.unwrap(),
-            cancel_generation_on_terminal_stop: agent.cancel_generation_on_terminal_stop.unwrap(),
-            use_modifier_to_send: agent.use_modifier_to_send.unwrap(),
-            message_editor_min_lines: agent.message_editor_min_lines.unwrap(),
-            show_turn_stats: agent.show_turn_stats.unwrap(),
+            enable_feedback: agent.enable_feedback.unwrap_or(true),
+            expand_edit_card: agent.expand_edit_card.unwrap_or(true),
+            expand_terminal_card: agent.expand_terminal_card.unwrap_or(true),
+            cancel_generation_on_terminal_stop: agent.cancel_generation_on_terminal_stop.unwrap_or(true),
+            use_modifier_to_send: agent.use_modifier_to_send.unwrap_or(false),
+            message_editor_min_lines: agent.message_editor_min_lines.unwrap_or(4),
+            show_turn_stats: agent.show_turn_stats.unwrap_or(false),
             tool_permissions: compile_tool_permissions(agent.tool_permissions),
             new_thread_location: agent.new_thread_location.unwrap_or_default(),
         }
@@ -558,6 +558,33 @@ mod tests {
     use serde_json::json;
     use settings::ToolPermissionMode;
     use settings::ToolPermissionsContent;
+
+    #[test]
+    fn agent_settings_use_fallbacks_when_partial_agent_config_is_present() {
+        let content = settings::SettingsContent {
+            agent: Some(settings::AgentSettingsContent {
+                enabled: Some(false),
+                button: Some(false),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let settings = AgentSettings::from_settings(&content);
+        assert!(!settings.enabled);
+        assert!(!settings.button);
+        assert_eq!(settings.dock, DockPosition::Right);
+        assert_eq!(settings.sidebar_side, SidebarDockPosition::FollowAgent);
+        assert_eq!(settings.default_width, px(640.0));
+        assert_eq!(settings.default_height, px(320.0));
+        assert_eq!(settings.default_view, DefaultAgentView::Thread);
+        assert_eq!(settings.default_profile, AgentProfileId("write".into()));
+        assert_eq!(settings.notify_when_agent_waiting, NotifyWhenAgentWaiting::PrimaryScreen);
+        assert!(!settings.play_sound_when_agent_done);
+        assert!(!settings.use_modifier_to_send);
+        assert_eq!(settings.message_editor_min_lines, 4);
+        assert!(!settings.show_turn_stats);
+    }
 
     #[test]
     fn test_compiled_regex_case_insensitive() {

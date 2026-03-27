@@ -141,14 +141,46 @@ pub struct StatusBarSettings {
 
 impl Settings for StatusBarSettings {
     fn from_settings(content: &settings::SettingsContent) -> Self {
-        let status_bar = content.status_bar.clone().unwrap();
+        let status_bar = content.status_bar.clone().unwrap_or_default();
         StatusBarSettings {
-            show: status_bar.show.unwrap(),
-            show_active_file: status_bar.show_active_file.unwrap(),
-            active_language_button: status_bar.active_language_button.unwrap(),
-            cursor_position_button: status_bar.cursor_position_button.unwrap(),
-            line_endings_button: status_bar.line_endings_button.unwrap(),
-            active_encoding_button: status_bar.active_encoding_button.unwrap(),
+            show: status_bar.show.unwrap_or(true),
+            show_active_file: status_bar.show_active_file.unwrap_or(false),
+            active_language_button: status_bar.active_language_button.unwrap_or(true),
+            cursor_position_button: status_bar.cursor_position_button.unwrap_or(true),
+            line_endings_button: status_bar.line_endings_button.unwrap_or(false),
+            active_encoding_button: status_bar
+                .active_encoding_button
+                .unwrap_or(EncodingDisplayOptions::NonUtf8),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn status_bar_settings_use_fallbacks_when_fields_are_missing() {
+        let content = settings::SettingsContent {
+            status_bar: Some(settings::StatusBarSettingsContent {
+                show: Some(true),
+                show_active_file: None,
+                active_language_button: None,
+                cursor_position_button: None,
+                line_endings_button: None,
+                active_encoding_button: None,
+            }),
+            ..Default::default()
+        };
+
+        let settings = StatusBarSettings::from_settings(&content);
+        assert!(!settings.show_active_file);
+        assert!(settings.active_language_button);
+        assert!(settings.cursor_position_button);
+        assert!(!settings.line_endings_button);
+        assert_eq!(
+            settings.active_encoding_button,
+            EncodingDisplayOptions::NonUtf8
+        );
     }
 }

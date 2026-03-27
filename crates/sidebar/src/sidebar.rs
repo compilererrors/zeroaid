@@ -61,7 +61,7 @@ mod lean_sidebar {
 
     impl Render for Sidebar {
         fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl gpui::IntoElement {
-            gpui::Empty
+            "Sidebar is enabled in this build."
         }
     }
 }

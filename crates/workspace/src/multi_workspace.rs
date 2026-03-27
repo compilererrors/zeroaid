@@ -1,10 +1,12 @@
 use anyhow::Result;
+#[cfg(feature = "ai")]
 use feature_flags::{AgentV2FeatureFlag, FeatureFlagAppExt};
 use gpui::{
     AnyView, App, Context, DragMoveEvent, Entity, EntityId, EventEmitter, FocusHandle, Focusable,
     ManagedView, MouseButton, Pixels, Render, Subscription, Task, Tiling, Window, WindowId,
     actions, deferred, px,
 };
+#[cfg(feature = "ai")]
 use project::DisableAiSettings;
 #[cfg(any(test, feature = "test-support"))]
 use project::Project;
@@ -209,9 +211,10 @@ impl MultiWorkspace {
         });
         let quit_subscription = cx.on_app_quit(Self::app_will_quit);
         let settings_subscription =
-            cx.observe_global_in::<settings::SettingsStore>(window, |this, window, cx| {
-                if DisableAiSettings::get_global(cx).disable_ai && this.sidebar_open {
-                    this.close_sidebar(window, cx);
+            cx.observe_global_in::<settings::SettingsStore>(window, |_this, _window, _cx| {
+                #[cfg(feature = "ai")]
+                if DisableAiSettings::get_global(_cx).disable_ai && _this.sidebar_open {
+                    _this.close_sidebar(_window, _cx);
                 }
             });
         Self::subscribe_to_workspace(&workspace, cx);
@@ -264,7 +267,16 @@ impl MultiWorkspace {
     }
 
     pub fn multi_workspace_enabled(&self, cx: &App) -> bool {
-        cx.has_flag::<AgentV2FeatureFlag>() && !DisableAiSettings::get_global(cx).disable_ai
+        #[cfg(feature = "ai")]
+        {
+            return cx.has_flag::<AgentV2FeatureFlag>() && !DisableAiSettings::get_global(cx).disable_ai;
+        }
+
+        #[cfg(not(feature = "ai"))]
+        {
+            let _ = cx;
+            true
+        }
     }
 
     pub fn toggle_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -971,11 +983,15 @@ mod tests {
             let settings_store = SettingsStore::test(cx);
             cx.set_global(settings_store);
             theme::init(theme::LoadThemes::JustBase, cx);
-            DisableAiSettings::register(cx);
-            cx.update_flags(false, vec!["agent-v2".into()]);
+            #[cfg(feature = "ai")]
+            {
+                DisableAiSettings::register(cx);
+                cx.update_flags(false, vec!["agent-v2".into()]);
+            }
         });
     }
 
+    #[cfg(feature = "ai")]
     #[gpui::test]
     async fn test_sidebar_disabled_when_disable_ai_is_enabled(cx: &mut TestAppContext) {
         init_test(cx);
